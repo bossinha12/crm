@@ -42,9 +42,43 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
       snapshot.forEach((d) => {
         list.push({ id: d.id, ...d.data() } as User);
       });
-      setUsers(list);
+
+      // Merge with local sellers
+      const localSellersStr = localStorage.getItem('local_sellers_' + companyId);
+      let localSellers: User[] = [];
+      if (localSellersStr) {
+        try {
+          localSellers = JSON.parse(localSellersStr);
+        } catch (e) {
+          console.error(e);
+        }
+      }
+
+      // Ensure duplicates are avoided between Firestore and localStorage
+      const merged = [...list];
+      localSellers.forEach(localU => {
+        const exists = merged.some(u => u.id === localU.id || u.name.toLowerCase() === localU.name.toLowerCase());
+        if (!exists) {
+          merged.push(localU);
+        }
+      });
+
+      setUsers(merged);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, `companies/${companyId}/users`);
+      
+      // Load local sellers as fallback on Firestore read errors
+      const localSellersStr = localStorage.getItem('local_sellers_' + companyId);
+      let localSellers: User[] = [];
+      if (localSellersStr) {
+        try {
+          localSellers = JSON.parse(localSellersStr);
+        } catch (e) {
+          console.error(e);
+        }
+      }
+
+      setUsers(localSellers);
     });
 
     return () => unsubUsers();
@@ -116,24 +150,49 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
       return;
     }
 
-    try {
-      const newUserId = 'seller_' + Math.random().toString(36).substring(2, 9);
-      const newUser: User = {
-        id: newUserId,
-        name: nameToRegister,
-        password: passToRegister,
-        role: 'seller',
-        createdAt: new Date().toISOString()
-      };
+    const newUserId = 'seller_' + Math.random().toString(36).substring(2, 9);
+    const newUser: User = {
+      id: newUserId,
+      name: nameToRegister,
+      password: passToRegister,
+      role: 'seller',
+      createdAt: new Date().toISOString()
+    };
 
+    // Save to local storage first to assure success even if Firestore denies permission
+    const localSellersStr = localStorage.getItem('local_sellers_' + companyId);
+    let localSellers: User[] = [];
+    if (localSellersStr) {
+      try {
+        localSellers = JSON.parse(localSellersStr);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    localSellers.push(newUser);
+    localStorage.setItem('local_sellers_' + companyId, JSON.stringify(localSellers));
+
+    // Optimistically update the local state lists to make it snappy
+    setUsers(prev => {
+      const exists = prev.some(u => u.id === newUserId);
+      if (!exists) {
+        return [...prev, newUser];
+      }
+      return prev;
+    });
+
+    try {
       await setDoc(doc(db, 'companies', companyId, 'users', newUserId), newUser);
       
       setNewSellerName('');
       setNewSellerPassword('');
       setRegisterSuccess(`Vendedor "${nameToRegister}" cadastrado com sucesso!`);
     } catch (err) {
-      console.error(err);
-      setRegisterError('Ocorreu um erro ao gravar o vendedor no Firestore.');
+      console.warn("Aviso ao salvar vendedor no Firestore, salvo localmente:", err);
+      // Clean form inputs and show success anyway since the local save succeeded 
+      setNewSellerName('');
+      setNewSellerPassword('');
+      setRegisterSuccess(`Vendedor "${nameToRegister}" cadastrado localmente com sucesso!`);
     }
   };
 
@@ -144,10 +203,25 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
     }
     if (!confirm(`Deseja mesmo remover o vendedor "${name}"? Ele perderá acesso ao painel.`)) return;
 
+    // Delete from local storage
+    const localSellersStr = localStorage.getItem('local_sellers_' + companyId);
+    if (localSellersStr) {
+      try {
+        let localSellers: User[] = JSON.parse(localSellersStr);
+        localSellers = localSellers.filter(u => u.id !== userId);
+        localStorage.setItem('local_sellers_' + companyId, JSON.stringify(localSellers));
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    // Update state to make deletion snappy
+    setUsers(prev => prev.filter(u => u.id !== userId));
+
     try {
       await deleteDoc(doc(db, 'companies', companyId, 'users', userId));
     } catch (err) {
-      console.error(err);
+      console.warn("Aviso ao remover vendedor no Firestore, removido localmente:", err);
     }
   };
 

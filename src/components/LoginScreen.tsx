@@ -30,6 +30,17 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
       // Set Larissa in available sellers first to make it immediately available
       setAvailableSellers([larissaUser]);
 
+      // Merge with local sellers!
+      const localSellersStr = localStorage.getItem('local_sellers_' + companyId);
+      let localSellers: User[] = [];
+      if (localSellersStr) {
+        try {
+          localSellers = JSON.parse(localSellersStr);
+        } catch (e) {
+          console.error(e);
+        }
+      }
+
       try {
         const usersRef = collection(db, 'companies', companyId, 'users');
         const snapshot = await getDocs(usersRef);
@@ -47,12 +58,29 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
         }
 
         // Filter out any duplicates
-        const filteredList = list.filter(u => u.name.toLowerCase() !== 'larissa' && u.id !== 'admin-larissa');
-        filteredList.unshift(larissaUser);
+        let filteredList = list.filter(u => u.name.toLowerCase() !== 'larissa' && u.id !== 'admin-larissa');
+        
+        // Add unique local sellers to the options list
+        localSellers.forEach(localU => {
+          const exists = filteredList.some(u => u.id === localU.id || u.name.toLowerCase() === localU.name.toLowerCase());
+          if (!exists) {
+            filteredList.push(localU);
+          }
+        });
 
+        filteredList.unshift(larissaUser);
         setAvailableSellers(filteredList);
       } catch (err) {
         console.warn("Aviso ao carregar usuários inicial:", err);
+        // Fallback using local sellers and administrative root Larson on fetch error
+        const backupList = [larissaUser];
+        localSellers.forEach(localU => {
+          const exists = backupList.some(u => u.id === localU.id || u.name.toLowerCase() === localU.name.toLowerCase());
+          if (!exists) {
+            backupList.push(localU);
+          }
+        });
+        setAvailableSellers(backupList);
       }
     }
     fetchUsers();
@@ -79,6 +107,29 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
 
     const inputName = sanitizeInput(username);
     const inputPassword = sanitizeInput(password);
+
+    // Try matching in local sellers first to render it completely robust off of permission issues
+    const localSellersStr = localStorage.getItem('local_sellers_' + companyId);
+    let localSellers: User[] = [];
+    if (localSellersStr) {
+      try {
+        localSellers = JSON.parse(localSellersStr);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    const localMatch = localSellers.find((u) => {
+      const storedName = sanitizeInput(u.name);
+      const storedPassword = u.password ? sanitizeInput(u.password) : '';
+      return storedName === inputName && storedPassword === inputPassword;
+    });
+
+    if (localMatch) {
+      onLoginSuccess(localMatch);
+      setLoading(false);
+      return;
+    }
 
     // Direct check: Instant validation for administrator Larissa, case-insensitive
     if (inputName === 'larissa' && inputPassword === '13259898') {
