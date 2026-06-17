@@ -11,6 +11,7 @@ export interface Company {
   status?: 'active' | 'blocked';
   blockMessage?: string;
   plan?: string;
+  expiresAt?: string;
 }
 
 export interface User {

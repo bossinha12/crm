@@ -42,21 +42,15 @@ export default function App() {
   // Defaults to 'client' for immediate customer chat mode
   const [currentView, setCurrentView] = useState<'home' | 'client' | 'login' | 'saas_admin'>('client');
   const [connecting, setConnecting] = useState(true);
-  
-  // Hidden easter egg clicks to access the SaaS admin dashboard (5 clicks)
-  const [secretClicks, setSecretClicks] = useState(0);
 
-  const handleSecretClick = () => {
-    setSecretClicks((prev) => {
-      const next = prev + 1;
-      if (next >= 5) {
-        window.history.pushState({}, '', '?view=saas_admin');
-        setCurrentView('saas_admin');
-        return 0; // reset
-      }
-      return next;
-    });
-  };
+  // Set dynamic browser tab title depending on active view
+  useEffect(() => {
+    if (currentView === 'saas_admin') {
+      document.title = 'SaaS MASTER - Controle Geral';
+    } else {
+      document.title = `${company?.name || 'Larissa Móveis'} - Atendimento Online`;
+    }
+  }, [currentView, company?.name]);
 
   // Parse direct access via URL Query Parameters (e.g. ?view=client, ?view=login, or ?view=portal)
   useEffect(() => {
@@ -66,7 +60,7 @@ export default function App() {
       setCurrentView('login');
     } else if (viewParam === 'portal') {
       setCurrentView('home');
-    } else if (viewParam === 'saas_admin') {
+    } else if (viewParam === 'admmaster') {
       setCurrentView('saas_admin');
     } else {
       // Default fallback for public customers accessing root URL
@@ -131,23 +125,26 @@ export default function App() {
     );
   }
 
-  // Render blocked/suspended screen if subscription/payment is missing
-  if (company?.status === 'blocked') {
+  // Render blocked/suspended screen if subscription/payment is missing or expired
+  const isExpired = company?.expiresAt ? new Date() > new Date(company.expiresAt) : false;
+  const isBlocked = company?.status === 'blocked' || isExpired;
+
+  if (isBlocked) {
+    const blockMessage = company?.status === 'blocked' 
+      ? company.blockMessage 
+      : "⚠️ Este portal de atendimento está temporariamente suspenso devido ao término da licença de 30 dias úteis/corridos. Entre em contato com a administração mestre do SaaS para efetuar a renovação.";
+
     return (
       <main className="min-h-screen bg-slate-950 flex flex-col justify-center items-center p-6 text-center select-none relative font-sans leading-relaxed">
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[400px] h-[400px] rounded-full bg-rose-500/5 blur-3xl -z-10 pointer-events-none"></div>
         <div className="max-w-md w-full bg-slate-900 border border-slate-800/80 rounded-3xl p-8 shadow-2xl space-y-6">
-          <div 
-            onClick={handleSecretClick}
-            className="mx-auto h-16 w-16 rounded-full bg-rose-950/50 border border-rose-850 flex items-center justify-center text-rose-500 cursor-pointer active:scale-95 transition-transform"
-            title="Clique 5 vezes para acesso mestre"
-          >
+          <div className="mx-auto h-16 w-16 rounded-full bg-rose-950/50 border border-rose-850 flex items-center justify-center text-rose-500">
             <ShieldAlert className="w-8 h-8 animate-pulse text-rose-400" />
           </div>
           <div className="space-y-3">
             <h2 className="text-xl font-extrabold text-slate-100 tracking-tight">Portal Suspenso</h2>
             <div className="text-xs text-rose-200 bg-rose-950/40 border border-rose-900/45 rounded-2xl p-4 text-left leading-relaxed font-medium">
-              {company.blockMessage || "⚠️ Este portal de atendimento está temporariamente suspenso devido a pendências de assinatura ou manutenção cadastral. Entre em contato com o suporte técnico para reestabelecer o serviço."}
+              {blockMessage || "⚠️ Este portal de atendimento está temporariamente suspenso devido a pendências de assinatura ou manutenção cadastral. Entre em contato com o suporte técnico para reestabelecer o serviço."}
             </div>
           </div>
           <p className="text-[11px] text-slate-500">
@@ -160,9 +157,33 @@ export default function App() {
 
   // Render Logged-In CRM consoles
   if (currentUser) {
+    // Check if license is expiring soon (<= 3 days and > 0 days)
+    const hasExpiryWarning = (() => {
+      if (!company?.expiresAt) return false;
+      const t = new Date(company.expiresAt).getTime() - Date.now();
+      const d = Math.ceil(t / (1000 * 60 * 60 * 24));
+      return d > 0 && d <= 3;
+    })();
+
+    const daysLeft = company?.expiresAt 
+      ? Math.ceil((new Date(company.expiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24)) 
+      : 0;
+
     return (
       <main className="min-h-screen bg-slate-100 flex flex-col p-4 sm:p-6 lg:p-8 font-sans">
-        <div className="max-w-7xl w-full mx-auto flex-1 flex flex-col select-none">
+        <div className="max-w-7xl w-full mx-auto flex-1 flex flex-col select-none space-y-4">
+          {hasExpiryWarning && currentUser.role === 'admin' && (
+            <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-2xl p-4 flex items-center gap-3 shadow-md text-xs sm:text-sm animate-pulse">
+              <ShieldAlert className="w-5 h-5 text-amber-600 shrink-0 animate-bounce" />
+              <div className="flex-1">
+                <span className="font-extrabold block text-amber-900 text-sm">Falta pouco para expirar! ⏰</span>
+                <span className="text-amber-800 font-medium text-xs block mt-0.5">
+                  Restam apenas <strong className="font-bold">{daysLeft} {daysLeft === 1 ? 'dia' : 'dias'}</strong> de uso do seu painel ({company?.expiresAt ? new Date(company.expiresAt).toLocaleDateString('pt-BR') : ''}). Renove sua assinatura agora com o suporte administrativo para evitar bloqueios automáticos.
+                </span>
+              </div>
+            </div>
+          )}
+
           {currentUser.role === 'admin' ? (
             <MasterDashboard 
               companyId={companyId} 
@@ -240,11 +261,7 @@ export default function App() {
         
         {/* Title branding heading block */}
         <div className="space-y-4">
-          <div 
-            onClick={handleSecretClick}
-            className="inline-flex h-12 w-12 rounded-2xl bg-indigo-600 items-center justify-center text-white shadow-xl shadow-indigo-100 mb-2 cursor-pointer active:scale-95 transition-all"
-            title="Acesso oculto SaaS"
-          >
+          <div className="inline-flex h-12 w-12 rounded-2xl bg-indigo-600 items-center justify-center text-white shadow-xl shadow-indigo-100 mb-2">
             <Compass className="h-6 w-6" id="welcome-compass-icon" />
           </div>
           <h1 className="text-4xl sm:text-5xl font-extrabold text-slate-900 tracking-tight text-balance">

@@ -35,7 +35,7 @@ export default function SaaSAdminDashboard({ onBackToPortal }: SaaSAdminDashboar
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // Master Access Secret Key (The master password)
-  const MASTER_PASSWORD = 'master9911';
+  const MASTER_PASSWORD = '1325989898';
 
   const handleAuthorize = (e: React.FormEvent) => {
     e.preventDefault();
@@ -100,12 +100,16 @@ export default function SaaSAdminDashboard({ onBackToPortal }: SaaSAdminDashboar
     setIsSubmitting(true);
     try {
       const companyRef = doc(db, 'companies', cleanId);
+      const thirtyDaysFromNow = new Date();
+      thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
+      
       const newCompany: Company = {
         id: cleanId,
         name: cleanName,
         createdAt: new Date().toISOString(),
         status: 'active',
-        blockMessage: ''
+        blockMessage: '',
+        expiresAt: thirtyDaysFromNow.toISOString()
       };
 
       await setDoc(companyRef, newCompany);
@@ -154,6 +158,32 @@ export default function SaaSAdminDashboard({ onBackToPortal }: SaaSAdminDashboar
     } catch (err) {
       console.error('Erro ao alterar status:', err);
       alert('Erro ao persistir alteração no Firestore.');
+    }
+  };
+
+  const handleRenewCompany = async (company: Company) => {
+    const now = Date.now();
+    const currentExpires = company.expiresAt ? new Date(company.expiresAt).getTime() : now;
+    const baseTime = currentExpires > now ? currentExpires : now;
+    const newExpires = new Date(baseTime + 30 * 24 * 60 * 60 * 1000).toISOString();
+
+    const confirmMsg = `Deseja renovar a assinatura da empresa "${company.name}" por mais 30 dias?\n\nNova data de expiração: ${new Date(newExpires).toLocaleDateString('pt-BR')}`;
+    if (!confirm(confirmMsg)) return;
+
+    try {
+      const ref = doc(db, 'companies', company.id);
+      await updateDoc(ref, { 
+        expiresAt: newExpires,
+        status: 'active'
+      });
+      
+      setCompanies((prev) => 
+        prev.map((c) => c.id === company.id ? { ...c, expiresAt: newExpires, status: 'active' } : c)
+      );
+      alert('Assinatura renovada por mais 30 dias com sucesso!');
+    } catch (err) {
+      console.error('Erro ao renovar assinatura:', err);
+      alert('Erro ao salvar renovação no Firestore.');
     }
   };
 
@@ -458,6 +488,62 @@ export default function SaaSAdminDashboard({ onBackToPortal }: SaaSAdminDashboar
                             )}
                           </div>
                         </div>
+
+                        {/* Expiration and License status controls */}
+                        {(() => {
+                          const expStr = company.expiresAt;
+                          if (!expStr) return (
+                            <div className="flex justify-between items-center bg-slate-950/20 px-4 py-3 rounded-xl mb-4 text-xs select-none border border-slate-800">
+                              <span className="text-slate-400">📅 Expiração não configurada (Sem limites de data)</span>
+                              <button 
+                                onClick={() => handleRenewCompany(company)}
+                                className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-white font-semibold text-[11px] cursor-pointer transition-colors"
+                              >
+                                Ativar 30 Dias
+                              </button>
+                            </div>
+                          );
+
+                          const expiryDate = new Date(expStr);
+                          const currentDate = new Date();
+                          const diffTime = expiryDate.getTime() - currentDate.getTime();
+                          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                          const isCurrentlyExpired = diffTime <= 0;
+
+                          return (
+                            <div className={`flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 py-3 rounded-xl mb-4 text-xs select-none border ${
+                              isCurrentlyExpired 
+                                ? 'bg-rose-950/25 border-rose-900/30' 
+                                : diffDays <= 3 
+                                ? 'bg-amber-950/25 border-amber-900/40 text-amber-200' 
+                                : 'bg-slate-950/20 border-slate-800'
+                            }`}>
+                              <div className="space-y-0.5">
+                                <div className="flex items-center gap-1.5 font-bold">
+                                  <span>📅 Expiração: {expiryDate.toLocaleDateString('pt-BR')}</span>
+                                  {isCurrentlyExpired ? (
+                                    <span className="bg-rose-950 border border-rose-800 text-rose-300 px-1.5 py-0.5 rounded text-[9px] uppercase tracking-wider font-extrabold">Expirado</span>
+                                  ) : diffDays <= 3 ? (
+                                    <span className="bg-amber-950 border border-amber-900 text-amber-300 px-1.5 py-0.5 rounded text-[9px] uppercase tracking-wider font-extrabold animate-pulse">Expira Logo</span>
+                                  ) : (
+                                    <span className="bg-emerald-950 border border-emerald-800 text-emerald-300 px-1.5 py-0.5 rounded text-[9px] uppercase tracking-wider font-extrabold">Ativo</span>
+                                  )}
+                                </div>
+                                <span className="text-[10px] text-slate-400">
+                                  {isCurrentlyExpired 
+                                    ? `Assinatura vencida há ${Math.abs(diffDays)} dias.` 
+                                    : `Restam ${diffDays} dias de licença.`}
+                                </span>
+                              </div>
+                              <button
+                                onClick={() => handleRenewCompany(company)}
+                                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-white font-bold text-[11px] cursor-pointer transition-colors shrink-0 font-sans"
+                              >
+                                ⚡ Renovar +30 Dias
+                              </button>
+                            </div>
+                          );
+                        })()}
 
                         {/* Middle row: Editable blockage custom message panel */}
                         {isCompanyBlocked && (
