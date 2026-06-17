@@ -48,7 +48,7 @@ export default function App() {
           // Auto create default shop metadata if missing
           const defaultCompany: Company = {
             id: companyId,
-            name: 'CRM Comercial',
+            name: 'Larissa Móveis',
             createdAt: new Date().toISOString()
           };
           await setDoc(companyDocRef, defaultCompany);
@@ -59,7 +59,7 @@ export default function App() {
         console.warn("Utilizando fallback local para a empresa devido a restrições de permissão/conexão:", err);
         setCompany({
           id: companyId,
-          name: 'CRM Comercial',
+          name: 'Larissa Móveis',
           createdAt: new Date().toISOString()
         });
       } finally {
@@ -112,7 +112,7 @@ export default function App() {
       <main className="min-h-screen bg-slate-100 flex flex-col justify-center items-center p-4 font-sans leading-relaxed">
         <ClientWidget 
           companyId={companyId} 
-          companyName={company?.name || 'Seu CRM Comercial'} 
+          companyName={company?.name || 'Larissa Móveis'} 
           onGoBack={hasPortalAccess ? () => {
             // Remove parameter on return
             window.history.pushState({}, '', '?view=portal');
@@ -165,8 +165,8 @@ export default function App() {
           <div className="inline-flex h-12 w-12 rounded-2xl bg-indigo-600 items-center justify-center text-white shadow-xl shadow-indigo-100 mb-2">
             <Compass className="h-6 w-6" id="welcome-compass-icon" />
           </div>
-          <h1 className="text-4xl sm:text-5xl font-extrabold text-slate-900 tracking-tight">
-            CRM <span className="text-indigo-600 block sm:inline">Ao Vivo</span>
+          <h1 className="text-4xl sm:text-5xl font-extrabold text-slate-900 tracking-tight text-balance">
+            Larissa Móveis <span className="text-indigo-600 block sm:inline">Atendimento Online</span>
           </h1>
           <p className="text-sm sm:text-base text-slate-500 max-w-lg mx-auto">
             Seu canal de atendimento direto. Fale conosco agora em tempo real com total praticidade e rapidez.

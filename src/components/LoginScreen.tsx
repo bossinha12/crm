@@ -195,9 +195,9 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
           <div className="mx-auto h-12 w-12 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-lg shadow-indigo-100 mb-4 animate-pulse">
             <Compass className="h-6 w-6" id="brand-compass-icon" />
           </div>
-          <h2 className="text-3xl font-extrabold text-slate-800 tracking-tight">CRM</h2>
+          <h2 className="text-3xl font-extrabold text-slate-800 tracking-tight">Larissa Móveis</h2>
           <p className="mt-2 text-sm text-slate-500">
-            Acompanhamento de atendimentos e monitoramento em tempo real
+            Atendimento Online • Portal de Vendedores e Gerente
           </p>
         </div>
 

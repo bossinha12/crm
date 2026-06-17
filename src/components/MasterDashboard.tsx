@@ -341,7 +341,7 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
           </table>
 
           <div class="footer">
-            <div>CRM — Painel Master Administrativo.</div>
+            <div>Larissa Móveis — Painel Master Administrativo.</div>
             <div>Assinatura do Proprietário: ___________________________</div>
           </div>
         </body>
@@ -359,7 +359,7 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
           <span className="text-indigo-400 font-extrabold text-[10px] tracking-wider uppercase bg-indigo-950/50 border border-indigo-800 px-2.5 py-0.5 rounded-full inline-block mb-1.5 animate-pulse">
             PAINEL MASTER • ADMINISTRADOR
           </span>
-          <h2 className="text-xl font-bold tracking-tight">CRM Master Control</h2>
+          <h2 className="text-xl font-bold tracking-tight">Larissa Móveis Master Control</h2>
           <p className="text-xs text-slate-400 mt-0.5">Gerenciador de equipes, gráficos de conversão e relatórios analíticos em tempo real</p>
         </div>
 
