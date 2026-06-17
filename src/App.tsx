@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, collection, getDocs, query, limit } from 'firebase/firestore';
 import { db, testFirestoreConnection } from './lib/firebase';
 import { User, Company } from './types';
 import LoginScreen from './components/LoginScreen';
@@ -79,14 +79,28 @@ export default function App() {
         if (snapshot.exists()) {
           setCompany({ id: snapshot.id, ...snapshot.data() } as Company);
         } else {
-          // Auto create default shop metadata if missing
-          const defaultCompany: Company = {
-            id: companyId,
-            name: 'Larissa Móveis',
-            createdAt: new Date().toISOString()
-          };
-          await setDoc(companyDocRef, defaultCompany);
-          setCompany(defaultCompany);
+          // Check if there are ANY companies in the database
+          let dbHasCompanies = false;
+          try {
+            const tempSnap = await getDocs(query(collection(db, 'companies'), limit(1)));
+            dbHasCompanies = !tempSnap.empty;
+          } catch (e) {
+            console.warn("Could not check other companies in db:", e);
+          }
+
+          if (!dbHasCompanies) {
+            // Database is totally empty, so it's safe to auto create default metadata
+            const defaultCompany: Company = {
+              id: companyId,
+              name: 'Larissa Móveis',
+              createdAt: new Date().toISOString()
+            };
+            await setDoc(companyDocRef, defaultCompany);
+            setCompany(defaultCompany);
+          } else {
+            // Not empty! This means the company was deleted explicitly. Respect that!
+            setCompany(null);
+          }
         }
       } catch (err) {
         // Fallback gracefully without blocking console.error
@@ -122,6 +136,29 @@ export default function App() {
           setCurrentView('home');
         }}
       />
+    );
+  }
+
+  // If company doesn't exist and we're not inside the SaaS Admin, show a clean portal-not-found screen
+  if (!company) {
+    return (
+      <main className="min-h-screen bg-slate-950 flex flex-col justify-center items-center p-6 text-center select-none relative font-sans leading-relaxed">
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[400px] h-[400px] rounded-full bg-rose-500/5 blur-3xl -z-10 pointer-events-none"></div>
+        <div className="max-w-md w-full bg-slate-900 border border-slate-800/80 rounded-3xl p-8 shadow-2xl space-y-6">
+          <div className="mx-auto h-16 w-16 rounded-full bg-rose-950/50 border border-rose-850 flex items-center justify-center text-rose-500">
+            <ShieldAlert className="w-8 h-8 text-rose-450" />
+          </div>
+          <div className="space-y-3">
+            <h2 className="text-xl font-extrabold text-slate-100 tracking-tight">Portal Suspenso ou Indisponível</h2>
+            <div className="text-xs text-rose-200 bg-rose-950/40 border border-rose-900/45 rounded-2xl p-4 text-left leading-relaxed font-semibold">
+              ⚠️ O link de acesso com ID <code className="text-amber-300 font-mono">"{companyId}"</code> não corresponde a nenhuma empresa ativa no sistema ou foi desativado definitivamente pela administração do SaaS.
+            </div>
+          </div>
+          <p className="text-[11px] text-slate-500 leading-relaxed">
+            Se você for o proprietário desse ambiente, consulte a aba de gerenciamento ou entre em contato com o suporte mestre para criar, reativar ou regularizar sua assinatura.
+          </p>
+        </div>
+      </main>
     );
   }
 

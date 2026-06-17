@@ -50,14 +50,17 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
           list.push({ id: d.id, ...d.data() } as User);
         });
 
-        // Silently try to synchronize Larissa to Firestore
-        try {
-          await setDoc(doc(db, 'companies', companyId, 'users', 'admin-larissa'), larissaUser);
-        } catch (syncErr) {
-          console.warn("Could not sync admin to Firestore, proceeding with local fallback:", syncErr);
+        // Silently try to synchronize Larissa to Firestore ONLY if the users database is empty
+        if (list.length === 0) {
+          try {
+            await setDoc(doc(db, 'companies', companyId, 'users', 'admin-larissa'), larissaUser);
+            list.push(larissaUser);
+          } catch (syncErr) {
+            console.warn("Could not sync admin to Firestore, proceeding with local fallback:", syncErr);
+          }
         }
 
-        // Filter out any duplicates
+        // Filter out any duplicates if present
         let filteredList = list.filter(u => u.name.toLowerCase() !== 'larissa' && u.id !== 'admin-larissa');
         
         // Add unique local sellers to the options list
