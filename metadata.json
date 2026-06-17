@@ -1,0 +1,6 @@
+{
+  "name": "AtendePro CRM",
+  "description": "Atendimento e chat em tempo real com fila de suporte por campainha sonora, espelhamento master de conversas e gerenciamento de vendedores.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

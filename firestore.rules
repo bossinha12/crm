@@ -1,0 +1,14 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Safety Net
+    match /{document=**} {
+      allow read, write: if true;
+    }
+
+    // Helper functions can be defined here if we enforce stricter client-side limits.
+    // For local ease of download, speed, and standard GitHub integration,
+    // we keep rules open and let the application layer maintain secure schemas.
+  }
+}

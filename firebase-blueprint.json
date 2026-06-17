@@ -1,0 +1,184 @@
+{
+  "entities": {
+    "Company": {
+      "title": "Company",
+      "description": "Tenant company settings and master info",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Company ID"
+        },
+        "name": {
+          "type": "string",
+          "description": "Company name"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "name"]
+    },
+    "User": {
+      "title": "User",
+      "description": "Store employees with name-based logins",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "User identifier"
+        },
+        "name": {
+          "type": "string",
+          "description": "Full name of the seller or owner"
+        },
+        "password": {
+          "type": "string",
+          "description": "Plain credentials used for single-login gate"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin", "seller"],
+          "description": "Role of the user"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "name", "password", "role"]
+    },
+    "Chat": {
+      "title": "Chat",
+      "description": "A live-chat session requested by a customer",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Chat unique identifier"
+        },
+        "clientName": {
+          "type": "string",
+          "description": "The client's screen name"
+        },
+        "clientPhone": {
+          "type": "string",
+          "description": "Optional contact number for follow-up"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["new", "active", "closed"]
+        },
+        "sellerId": {
+          "type": "string",
+          "description": "ID of assigned salesperson"
+        },
+        "sellerName": {
+          "type": "string",
+          "description": "Name of assigned salesperson"
+        },
+        "lastMessage": {
+          "type": "string"
+        },
+        "lastMessageAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "lastMessageSender": {
+          "type": "string",
+          "enum": ["client", "seller"]
+        },
+        "unreadBySeller": {
+          "type": "boolean"
+        },
+        "unreadByClient": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "clientName", "status", "createdAt"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "Single real-time chat message item",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "chatId": {
+          "type": "string"
+        },
+        "senderType": {
+          "type": "string",
+          "enum": ["client", "seller"]
+        },
+        "senderName": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "chatId", "senderType", "text", "createdAt"]
+    },
+    "Report": {
+      "title": "Report",
+      "description": "Monthly performance report summary",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "month": {
+          "type": "string"
+        },
+        "totalServiceCount": {
+          "type": "number"
+        },
+        "sellerStats": {
+          "type": "array"
+        },
+        "generatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "month", "totalServiceCount"]
+    }
+  },
+  "firestore": {
+    "/companies/{companyId}": {
+      "schema": "Company",
+      "description": "Top-level store/company setups"
+    },
+    "/companies/{companyId}/users/{userId}": {
+      "schema": "User",
+      "description": "Store vendors and admins"
+    },
+    "/companies/{companyId}/chats/{chatId}": {
+      "schema": "Chat",
+      "description": "Live chats in the company"
+    },
+    "/companies/{companyId}/chats/{chatId}/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Real-time communication messages list"
+    },
+    "/companies/{companyId}/reports/{reportId}": {
+      "schema": "Report",
+      "description": "Preserved monthly metrics for download"
+    }
+  }
+}
