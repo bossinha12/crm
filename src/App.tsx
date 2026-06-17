@@ -55,7 +55,13 @@ export default function App() {
           setCompany(defaultCompany);
         }
       } catch (err) {
-        console.error("Erro no bootstrap da empresa:", err);
+        // Fallback gracefully without blocking console.error
+        console.warn("Utilizando fallback local para a empresa devido a restrições de permissão/conexão:", err);
+        setCompany({
+          id: companyId,
+          name: 'CRM Comercial',
+          createdAt: new Date().toISOString()
+        });
       } finally {
         setConnecting(false);
       }
