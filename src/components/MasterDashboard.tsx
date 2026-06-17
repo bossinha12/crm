@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { collection, onSnapshot, query, orderBy, doc, setDoc, deleteDoc } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, doc, setDoc, deleteDoc, getDocs } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { User, Chat, Message, ChatStatus } from '../types';
 import { 
@@ -33,6 +33,7 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
 
   // Active Menu Tabs: 'analytics' | 'sellers' | 'live-feeds'
   const [activeTab, setActiveTab] = useState<'analytics' | 'sellers' | 'live-feeds'>('analytics');
+  const [isClearing, setIsClearing] = useState(false);
 
   // Load all users (Vendedores) in real time
   useEffect(() => {
@@ -225,6 +226,53 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
     }
   };
 
+  const handleClearAllData = async () => {
+    if (chats.length === 0) {
+      alert('Não há conversas ou históricos registrados para apagar.');
+      return;
+    }
+
+    const firstConfirm = confirm(
+      '⚠️ ATENÇÃO: Você tem certeza que deseja EXCLUIR DEFINITIVAMENTE todos os históricos de atendimento, conversas e mensagens desta empresa? Esta ação é irreversível.'
+    );
+    if (!firstConfirm) return;
+
+    const secondConfirm = confirm(
+      'Confirmar exclusão em massa: Esta ação irá zerar todo o relatório mensal, gráficos e histórico de conversas do banco de dados do Firestore. Deseja prosseguir?'
+    );
+    if (!secondConfirm) return;
+
+    setIsClearing(true);
+    try {
+      // Loop through all currently fetched chats and delete their subcollections and the documents themselves
+      const deletePromises = chats.map(async (chat) => {
+        try {
+          // 1. Fetch and delete messages subcollection
+          const messagesRef = collection(db, 'companies', companyId, 'chats', chat.id, 'messages');
+          const msgSnapshot = await getDocs(messagesRef);
+          const msgDeletes = msgSnapshot.docs.map((docItem) => 
+            deleteDoc(doc(db, 'companies', companyId, 'chats', chat.id, 'messages', docItem.id))
+          );
+          await Promise.all(msgDeletes);
+          
+          // 2. Delete the chat itself
+          await deleteDoc(doc(db, 'companies', companyId, 'chats', chat.id));
+        } catch (e) {
+          console.warn(`Erro ao excluir chat ${chat.id}:`, e);
+        }
+      });
+
+      await Promise.all(deletePromises);
+      alert('Todos os dados de atendimentos e históricos de conversas foram excluídos com sucesso!');
+    } catch (err) {
+      console.error('Erro ao excluir dados:', err);
+      alert('Ocorreu um erro ao excluir alguns dados do Firestore, mas boa parte foi removida.');
+    } finally {
+      setIsClearing(false);
+      setMirroredChatId(null);
+    }
+  };
+
   // Compile salesperson Recharts data & Metrics
   const compiledChartData = users
     .filter(u => u.role === 'seller')
@@ -363,13 +411,24 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
           <p className="text-xs text-slate-400 mt-0.5">Gerenciador de equipes, gráficos de conversão e relatórios analíticos em tempo real</p>
         </div>
 
-        <button
-          onClick={onLogout}
-          className="text-xs bg-slate-800 hover:bg-slate-700/80 border border-slate-700 rounded-xl px-4 py-2 font-bold text-slate-300 flex items-center gap-1.5 transition-all"
-        >
-          <LogOut className="w-3.5 h-3.5" />
-          <span>Sair Master</span>
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={handleClearAllData}
+            disabled={isClearing}
+            className={`text-xs bg-rose-950/80 hover:bg-rose-900 border border-rose-800 rounded-xl px-4 py-2 font-bold text-rose-200 flex items-center gap-1.5 transition-all shadow-md shadow-rose-950/20 ${isClearing ? 'opacity-50 cursor-not-allowed' : ''}`}
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>{isClearing ? 'Limpando Banco...' : 'Limpar Históricos de Teste'}</span>
+          </button>
+
+          <button
+            onClick={onLogout}
+            className="text-xs bg-slate-800 hover:bg-slate-700/80 border border-slate-700 rounded-xl px-4 py-2 font-bold text-slate-300 flex items-center gap-1.5 transition-all"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span>Sair Master</span>
+          </button>
+        </div>
       </div>
 
       {/* Main KPI Stats blocks */}
