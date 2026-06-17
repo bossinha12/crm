@@ -23,24 +23,26 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
         const usersRef = collection(db, 'companies', companyId, 'users');
         const snapshot = await getDocs(usersRef);
         
-        if (snapshot.empty) {
-          // Auto-bootstrap default Master Admin if company user collection is brand-new/empty
-          const defaultAdmin: User = {
-            id: 'admin-master',
-            name: 'Gerente Administrador',
-            password: 'admin',
+        let list: User[] = [];
+        snapshot.forEach((d) => {
+          list.push({ id: d.id, ...d.data() } as User);
+        });
+
+        // Garantir que a administradora Larissa existe
+        const larissaExists = list.some(u => u.name.toLowerCase() === 'larissa');
+        if (!larissaExists) {
+          const larissaUser: User = {
+            id: 'admin-larissa',
+            name: 'Larissa',
+            password: '13259898',
             role: 'admin',
             createdAt: new Date().toISOString()
           };
-          await setDoc(doc(db, 'companies', companyId, 'users', 'admin-master'), defaultAdmin);
-          setAvailableSellers([defaultAdmin]);
-        } else {
-          const list: User[] = [];
-          snapshot.forEach((d) => {
-            list.push({ id: d.id, ...d.data() } as User);
-          });
-          setAvailableSellers(list);
+          await setDoc(doc(db, 'companies', companyId, 'users', 'admin-larissa'), larissaUser);
+          list.push(larissaUser);
         }
+
+        setAvailableSellers(list);
       } catch (err) {
         console.error("Erro ao carregar usuários inicial:", err);
       }
@@ -110,10 +112,10 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
             <Sparkles className="w-3.5 h-3.5" />
             <span>Configuração Inicial:</span>
           </div>
-          <p>Seja bem-vindo! Caso seja o primeiro acesso da sua loja:</p>
+          <p>Login de acesso para Administração:</p>
           <div className="font-mono bg-white p-2 rounded border border-slate-200 mt-1 select-all text-center">
-            Nome: <span className="font-bold text-indigo-600">Gerente Administrador</span> <br />
-            Senha: <span className="font-bold text-indigo-600">admin</span>
+            Nome: <span className="font-bold text-indigo-600">Larissa</span> <br />
+            Senha: <span className="font-bold text-indigo-600">13259898</span>
           </div>
         </div>
 

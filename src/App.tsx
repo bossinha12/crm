@@ -16,17 +16,21 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   
   // Views navigation selection: 'home' | 'client' | 'login'
-  const [currentView, setCurrentView] = useState<'home' | 'client' | 'login'>('home');
+  // Defaults to 'client' for immediate customer chat mode
+  const [currentView, setCurrentView] = useState<'home' | 'client' | 'login'>('client');
   const [connecting, setConnecting] = useState(true);
 
-  // Parse direct access via URL Query Parameters (e.g. ?view=client or ?view=login)
+  // Parse direct access via URL Query Parameters (e.g. ?view=client, ?view=login, or ?view=portal)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const viewParam = params.get('view');
-    if (viewParam === 'client') {
-      setCurrentView('client');
-    } else if (viewParam === 'login') {
+    if (viewParam === 'login') {
       setCurrentView('login');
+    } else if (viewParam === 'portal') {
+      setCurrentView('home');
+    } else {
+      // Default fallback for public customers accessing root URL
+      setCurrentView('client');
     }
   }, []);
 
@@ -95,16 +99,19 @@ export default function App() {
 
   // Render Independent Customer Support View
   if (currentView === 'client') {
+    const params = new URLSearchParams(window.location.search);
+    const hasPortalAccess = params.get('portal') === 'true';
+
     return (
       <main className="min-h-screen bg-slate-100 flex flex-col justify-center items-center p-4 font-sans leading-relaxed">
         <ClientWidget 
           companyId={companyId} 
           companyName={company?.name || 'Seu CRM Comercial'} 
-          onGoBack={() => {
+          onGoBack={hasPortalAccess ? () => {
             // Remove parameter on return
-            window.history.pushState({}, '', window.location.pathname);
+            window.history.pushState({}, '', '?view=portal');
             setCurrentView('home');
-          }} 
+          } : undefined} 
         />
       </main>
     );
@@ -112,19 +119,24 @@ export default function App() {
 
   // Render Independent Employee Login View
   if (currentView === 'login') {
+    const params = new URLSearchParams(window.location.search);
+    const hasPortalAccess = params.get('portal') === 'true';
+
     return (
       <main className="min-h-screen bg-slate-100 flex flex-col p-4 font-sans leading-relaxed">
-        <div className="absolute top-4 left-4">
-          <button
-            onClick={() => {
-              window.history.pushState({}, '', window.location.pathname);
-              setCurrentView('home');
-            }}
-            className="text-xs font-semibold bg-white border border-slate-200 text-slate-500 hover:text-slate-800 px-3.5 py-2 rounded-xl transition-all"
-          >
-            ← Voltar para a Início
-          </button>
-        </div>
+        {hasPortalAccess && (
+          <div className="absolute top-4 left-4">
+            <button
+              onClick={() => {
+                window.history.pushState({}, '', '?view=portal');
+                setCurrentView('home');
+              }}
+              className="text-xs font-semibold bg-white border border-slate-200 text-slate-500 hover:text-slate-800 px-3.5 py-2 rounded-xl transition-all cursor-pointer"
+            >
+              ← Voltar para a Início
+            </button>
+          </div>
+        )}
         <LoginScreen 
           companyId={companyId} 
           onLoginSuccess={(user) => setCurrentUser(user)} 
@@ -151,7 +163,7 @@ export default function App() {
             CRM <span className="text-indigo-600 block sm:inline">Ao Vivo</span>
           </h1>
           <p className="text-sm sm:text-base text-slate-500 max-w-lg mx-auto">
-            Integração em tempo real com Firestore. Conecte clientes finais instantaneamente a vendedores ativos no painel geral.
+            Seu canal de atendimento direto. Fale conosco agora em tempo real com total praticidade e rapidez.
           </p>
         </div>
 
@@ -161,7 +173,7 @@ export default function App() {
           {/* Card 1: Customer Entrance point */}
           <button
             onClick={() => {
-              window.history.pushState({}, '', '?view=client');
+              window.history.pushState({}, '', '?view=client&portal=true');
               setCurrentView('client');
             }}
             className="text-left group relative bg-white border border-slate-200 hover:border-indigo-500 rounded-3xl p-6 shadow-xl shadow-slate-100 transition-all hover:-translate-y-1 block duration-300 cursor-pointer"
@@ -184,7 +196,7 @@ export default function App() {
           {/* Card 2: Company Employee Area entrance point */}
           <button
             onClick={() => {
-              window.history.pushState({}, '', '?view=login');
+              window.history.pushState({}, '', '?view=login&portal=true');
               setCurrentView('login');
             }}
             className="text-left group relative bg-white border border-slate-200 hover:border-indigo-500 rounded-3xl p-6 shadow-xl shadow-slate-100 transition-all hover:-translate-y-1 block duration-300 cursor-pointer"

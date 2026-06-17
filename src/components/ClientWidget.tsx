@@ -7,7 +7,7 @@ import { Send, MessageSquare, Phone, User, CheckCheck, Landmark, RefreshCw, XCir
 interface ClientWidgetProps {
   companyId: string;
   companyName: string;
-  onGoBack: () => void;
+  onGoBack?: () => void;
 }
 
 export default function ClientWidget({ companyId, companyName, onGoBack }: ClientWidgetProps) {
@@ -257,15 +257,17 @@ export default function ClientWidget({ companyId, companyName, onGoBack }: Clien
           </div>
 
           {/* Quick return link to master menu */}
-          <div className="pt-1 text-center">
-            <button
-              type="button"
-              onClick={onGoBack}
-              className="text-xs text-slate-400 hover:text-slate-600 transition-colors uppercase tracking-wider font-semibold"
-            >
-              Voltar ao painel inicial
-            </button>
-          </div>
+          {onGoBack && (
+            <div className="pt-1 text-center">
+              <button
+                type="button"
+                onClick={onGoBack}
+                className="text-xs text-slate-400 hover:text-slate-600 transition-colors uppercase tracking-wider font-semibold cursor-pointer"
+              >
+                Voltar ao painel inicial
+              </button>
+            </div>
+          )}
         </form>
       </div>
     );
