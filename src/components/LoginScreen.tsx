@@ -106,18 +106,7 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
           </p>
         </div>
 
-        {/* Informative credentials box for quick starting */}
-        <div className="bg-slate-50 border border-slate-100 rounded-xl p-4 text-xs text-slate-600 space-y-1">
-          <div className="flex items-center text-indigo-700 font-semibold gap-1 mb-1">
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>Configuração Inicial:</span>
-          </div>
-          <p>Login de acesso para Administração:</p>
-          <div className="font-mono bg-white p-2 rounded border border-slate-200 mt-1 select-all text-center">
-            Nome: <span className="font-bold text-indigo-600">Larissa</span> <br />
-            Senha: <span className="font-bold text-indigo-600">13259898</span>
-          </div>
-        </div>
+        {/* Informative credentials box removed at user request */}
 
         {error && (
           <div className="bg-rose-50 border border-rose-100 rounded-xl p-3 flex items-start gap-2.5 text-xs text-rose-800">
