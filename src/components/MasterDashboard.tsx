@@ -227,11 +227,6 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
   };
 
   const handleClearAllData = async () => {
-    if (chats.length === 0) {
-      alert('Não há conversas ou históricos registrados para apagar.');
-      return;
-    }
-
     const firstConfirm = confirm(
       '⚠️ ATENÇÃO: Você tem certeza que deseja EXCLUIR DEFINITIVAMENTE todos os históricos de atendimento, conversas e mensagens desta empresa? Esta ação é irreversível.'
     );
@@ -244,32 +239,42 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
 
     setIsClearing(true);
     try {
-      // Loop through all currently fetched chats and delete their subcollections and the documents themselves
-      const deletePromises = chats.map(async (chat) => {
-        try {
-          // 1. Fetch and delete messages subcollection
-          const messagesRef = collection(db, 'companies', companyId, 'chats', chat.id, 'messages');
-          const msgSnapshot = await getDocs(messagesRef);
-          const msgDeletes = msgSnapshot.docs.map((docItem) => 
-            deleteDoc(doc(db, 'companies', companyId, 'chats', chat.id, 'messages', docItem.id))
-          );
-          await Promise.all(msgDeletes);
-          
-          // 2. Delete the chat itself
-          await deleteDoc(doc(db, 'companies', companyId, 'chats', chat.id));
-        } catch (e) {
-          console.warn(`Erro ao excluir chat ${chat.id}:`, e);
-        }
+      // 1. Fetch all chats directly from the server to bypass any cached or stale local state
+      const chatsRef = collection(db, 'companies', companyId, 'chats');
+      const chatSnapshot = await getDocs(chatsRef);
+
+      // 2. Prepare and execute all deletion processes
+      const deletePromises = chatSnapshot.docs.map(async (chatDoc) => {
+        const chatID = chatDoc.id;
+        
+        // Fetch and delete all messages in this chat's subcollection
+        const messagesRef = collection(db, 'companies', companyId, 'chats', chatID, 'messages');
+        const msgSnapshot = await getDocs(messagesRef);
+        const msgDeletes = msgSnapshot.docs.map((msgDoc) => 
+          deleteDoc(doc(db, 'companies', companyId, 'chats', chatID, 'messages', msgDoc.id))
+        );
+        await Promise.all(msgDeletes);
+        
+        // Delete the chat document itself
+        await deleteDoc(doc(db, 'companies', companyId, 'chats', chatID));
       });
 
       await Promise.all(deletePromises);
-      alert('Todos os dados de atendimentos e históricos de conversas foram excluídos com sucesso!');
+
+      // 3. Clear potential customer active session stored on browsers
+      localStorage.removeItem('atendepro_client_chat_id');
+
+      // 4. Force empty the local React state for immediate snappy UI rendering
+      setChats([]);
+      setMirroredChatId(null);
+      setMirroredMessages([]);
+
+      alert('Todos os dados de atendimentos e históricos de conversas foram excluídos com sucesso do banco de dados!');
     } catch (err) {
       console.error('Erro ao excluir dados:', err);
-      alert('Ocorreu um erro ao excluir alguns dados do Firestore, mas boa parte foi removida.');
+      alert(`Ocorreu um erro ao excluir os dados do Firestore: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsClearing(false);
-      setMirroredChatId(null);
     }
   };
 
