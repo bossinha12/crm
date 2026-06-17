@@ -6,12 +6,16 @@ import LoginScreen from './components/LoginScreen';
 import ClientWidget from './components/ClientWidget';
 import SellerDashboard from './components/SellerDashboard';
 import MasterDashboard from './components/MasterDashboard';
+import SaaSAdminDashboard from './components/SaaSAdminDashboard';
 import { 
-  Compass, Headphones, ShieldAlert, Sparkles, LogIn, ChevronRight, HelpCircle 
+  Compass, Headphones, ShieldAlert, Sparkles, LogIn, ChevronRight, HelpCircle, Shield 
 } from 'lucide-react';
 
 export default function App() {
-  const [companyId] = useState('atendepro_default');
+  const [companyId, setCompanyId] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('c') || params.get('company') || params.get('id') || 'atendepro_default';
+  });
   const [company, setCompany] = useState<Company | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     const saved = localStorage.getItem('crm_current_user_atendepro');
@@ -34,10 +38,25 @@ export default function App() {
     }
   }, [currentUser]);
   
-  // Views navigation selection: 'home' | 'client' | 'login'
+  // Views navigation selection: 'home' | 'client' | 'login' | 'saas_admin'
   // Defaults to 'client' for immediate customer chat mode
-  const [currentView, setCurrentView] = useState<'home' | 'client' | 'login'>('client');
+  const [currentView, setCurrentView] = useState<'home' | 'client' | 'login' | 'saas_admin'>('client');
   const [connecting, setConnecting] = useState(true);
+  
+  // Hidden easter egg clicks to access the SaaS admin dashboard (5 clicks)
+  const [secretClicks, setSecretClicks] = useState(0);
+
+  const handleSecretClick = () => {
+    setSecretClicks((prev) => {
+      const next = prev + 1;
+      if (next >= 5) {
+        window.history.pushState({}, '', '?view=saas_admin');
+        setCurrentView('saas_admin');
+        return 0; // reset
+      }
+      return next;
+    });
+  };
 
   // Parse direct access via URL Query Parameters (e.g. ?view=client, ?view=login, or ?view=portal)
   useEffect(() => {
@@ -47,6 +66,8 @@ export default function App() {
       setCurrentView('login');
     } else if (viewParam === 'portal') {
       setCurrentView('home');
+    } else if (viewParam === 'saas_admin') {
+      setCurrentView('saas_admin');
     } else {
       // Default fallback for public customers accessing root URL
       setCurrentView('client');
@@ -96,6 +117,44 @@ export default function App() {
           <span className="text-sm font-semibold text-slate-500">Conectando ao banco de dados Firestore...</span>
         </div>
       </div>
+    );
+  }
+
+  if (currentView === 'saas_admin') {
+    return (
+      <SaaSAdminDashboard 
+        onBackToPortal={() => {
+          window.history.pushState({}, '', '?view=portal');
+          setCurrentView('home');
+        }}
+      />
+    );
+  }
+
+  // Render blocked/suspended screen if subscription/payment is missing
+  if (company?.status === 'blocked') {
+    return (
+      <main className="min-h-screen bg-slate-950 flex flex-col justify-center items-center p-6 text-center select-none relative font-sans leading-relaxed">
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[400px] h-[400px] rounded-full bg-rose-500/5 blur-3xl -z-10 pointer-events-none"></div>
+        <div className="max-w-md w-full bg-slate-900 border border-slate-800/80 rounded-3xl p-8 shadow-2xl space-y-6">
+          <div 
+            onClick={handleSecretClick}
+            className="mx-auto h-16 w-16 rounded-full bg-rose-950/50 border border-rose-850 flex items-center justify-center text-rose-500 cursor-pointer active:scale-95 transition-transform"
+            title="Clique 5 vezes para acesso mestre"
+          >
+            <ShieldAlert className="w-8 h-8 animate-pulse text-rose-400" />
+          </div>
+          <div className="space-y-3">
+            <h2 className="text-xl font-extrabold text-slate-100 tracking-tight">Portal Suspenso</h2>
+            <div className="text-xs text-rose-200 bg-rose-950/40 border border-rose-900/45 rounded-2xl p-4 text-left leading-relaxed font-medium">
+              {company.blockMessage || "⚠️ Este portal de atendimento está temporariamente suspenso devido a pendências de assinatura ou manutenção cadastral. Entre em contato com o suporte técnico para reestabelecer o serviço."}
+            </div>
+          </div>
+          <p className="text-[11px] text-slate-500">
+            Se você for o proprietário desse ambiente, contate o atendimento para regularizar e reativar imediatamente.
+          </p>
+        </div>
+      </main>
     );
   }
 
@@ -181,11 +240,15 @@ export default function App() {
         
         {/* Title branding heading block */}
         <div className="space-y-4">
-          <div className="inline-flex h-12 w-12 rounded-2xl bg-indigo-600 items-center justify-center text-white shadow-xl shadow-indigo-100 mb-2">
+          <div 
+            onClick={handleSecretClick}
+            className="inline-flex h-12 w-12 rounded-2xl bg-indigo-600 items-center justify-center text-white shadow-xl shadow-indigo-100 mb-2 cursor-pointer active:scale-95 transition-all"
+            title="Acesso oculto SaaS"
+          >
             <Compass className="h-6 w-6" id="welcome-compass-icon" />
           </div>
           <h1 className="text-4xl sm:text-5xl font-extrabold text-slate-900 tracking-tight text-balance">
-            Larissa Móveis <span className="text-indigo-600 block sm:inline">Atendimento Online</span>
+            {company?.name || 'Larissa Móveis'} <span className="text-indigo-600 block sm:inline">Atendimento Online</span>
           </h1>
           <p className="text-sm sm:text-base text-slate-500 max-w-lg mx-auto">
             Seu canal de atendimento direto. Fale conosco agora em tempo real com total praticidade e rapidez.
@@ -244,9 +307,11 @@ export default function App() {
         </div>
 
         {/* Informative Footer Badge and system specs */}
-        <div className="text-[11px] text-slate-400 flex justify-center items-center gap-1">
-          <HelpCircle className="w-3.5 h-3.5" />
-          <span>Fidelidade instantânea de conexões e sincronização em tempo real via Firestore</span>
+        <div className="text-[11px] text-slate-400 flex flex-col justify-center items-center gap-2">
+          <div className="flex justify-center items-center gap-1">
+            <HelpCircle className="w-3.5 h-3.5" />
+            <span>Fidelidade instantânea de conexões e sincronização em tempo real via Firestore</span>
+          </div>
         </div>
 
       </div>
