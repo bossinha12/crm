@@ -321,7 +321,7 @@ export default function ClientWidget({ companyId, companyName, onGoBack }: Clien
         
         {/* Welcome indicator */}
         <div className="text-center py-2 text-xs text-slate-400">
-          Início do histórico de chat instantâneo - AtendePro CRM
+          Início do histórico de chat instantâneo - CRM
         </div>
 
         {messages.map((m) => {

@@ -44,7 +44,7 @@ export default function App() {
           // Auto create default shop metadata if missing
           const defaultCompany: Company = {
             id: companyId,
-            name: 'AtendePro CRM Comercial',
+            name: 'CRM Comercial',
             createdAt: new Date().toISOString()
           };
           await setDoc(companyDocRef, defaultCompany);
@@ -99,7 +99,7 @@ export default function App() {
       <main className="min-h-screen bg-slate-100 flex flex-col justify-center items-center p-4 font-sans leading-relaxed">
         <ClientWidget 
           companyId={companyId} 
-          companyName={company?.name || 'Sua Loja AtendePro'} 
+          companyName={company?.name || 'Seu CRM Comercial'} 
           onGoBack={() => {
             // Remove parameter on return
             window.history.pushState({}, '', window.location.pathname);
@@ -148,7 +148,7 @@ export default function App() {
             <Compass className="h-6 w-6" id="welcome-compass-icon" />
           </div>
           <h1 className="text-4xl sm:text-5xl font-extrabold text-slate-900 tracking-tight">
-            AtendePro CRM <span className="text-indigo-600 block sm:inline">Ao Vivo</span>
+            CRM <span className="text-indigo-600 block sm:inline">Ao Vivo</span>
           </h1>
           <p className="text-sm sm:text-base text-slate-500 max-w-lg mx-auto">
             Integração em tempo real com Firestore. Conecte clientes finais instantaneamente a vendedores ativos no painel geral.

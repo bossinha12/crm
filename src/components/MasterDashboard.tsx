@@ -199,7 +199,7 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
     printWindow.document.write(`
       <html>
         <head>
-          <title>Relatorio_CRM_AtendePro_${currentMonthLabel.replace(' ', '_')}</title>
+          <title>Relatorio_CRM_${currentMonthLabel.replace(' ', '_')}</title>
           <style>
             @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800&display=swap');
             body { 
@@ -224,7 +224,7 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
           <div class="header">
             <div style="display: flex; justify-content: space-between; align-items: center;">
               <div>
-                <div class="logo">AtendePro CRM • Relatório de Desempenho</div>
+                <div class="logo">CRM • Relatório de Desempenho</div>
                 <div class="subtitle">Período Mensal: ${currentMonthLabel}</div>
               </div>
               <div style="text-align: right; font-size: 13px; color: #475569;">
@@ -262,12 +262,12 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
               </tr>
             </thead>
             <tbody>
-              ${rowsHtml || `<tr><td colspan="6" style="padding: 20px; text-align: center; color: #94a3b8;">Nenhum funcionário cadastrado sob o CRM AtendePro.</td></tr>`}
+              ${rowsHtml || `<tr><td colspan="6" style="padding: 20px; text-align: center; color: #94a3b8;">Nenhum funcionário cadastrado sob o CRM.</td></tr>`}
             </tbody>
           </table>
 
           <div class="footer">
-            <div>AtendePro CRM — Painel Master Administrativo.</div>
+            <div>CRM — Painel Master Administrativo.</div>
             <div>Assinatura do Proprietário: ___________________________</div>
           </div>
         </body>
@@ -285,7 +285,7 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
           <span className="text-indigo-400 font-extrabold text-[10px] tracking-wider uppercase bg-indigo-950/50 border border-indigo-800 px-2.5 py-0.5 rounded-full inline-block mb-1.5 animate-pulse">
             PAINEL MASTER • ADMINISTRADOR
           </span>
-          <h2 className="text-xl font-bold tracking-tight">AtendePro CRM Master Control</h2>
+          <h2 className="text-xl font-bold tracking-tight">CRM Master Control</h2>
           <p className="text-xs text-slate-400 mt-0.5">Gerenciador de equipes, gráficos de conversão e relatórios analíticos em tempo real</p>
         </div>
 
@@ -517,7 +517,7 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
                       <p className="text-center text-slate-500 py-12">Carregando feed de transmissão...</p>
                     ) : (
                       mirroredMessages.map((m) => {
-                        const isSystem = m.senderName === 'AtendePro Sistema';
+                        const isSystem = m.senderName === 'Sistema';
                         const isSeller = m.senderType === 'seller';
                         return (
                           <div key={m.id} className="border-l border-slate-800 pl-2 leading-relaxed">

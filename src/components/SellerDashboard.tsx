@@ -127,7 +127,7 @@ export default function SellerDashboard({ companyId, sellerUser, onLogout }: Sel
         chatId: chat.id,
         companyId,
         senderType: 'seller',
-        senderName: 'AtendePro Sistema',
+        senderName: 'Sistema',
         text: `O atendimento foi assumido por: **${sellerUser.name}**`,
         createdAt: new Date().toISOString()
       });
@@ -189,7 +189,7 @@ export default function SellerDashboard({ companyId, sellerUser, onLogout }: Sel
         chatId: selectedChatId,
         companyId,
         senderType: 'seller',
-        senderName: 'AtendePro Sistema',
+        senderName: 'Sistema',
         text: `--- Atendimento encerrado por ${sellerUser.name} ---`,
         createdAt: new Date().toISOString()
       });
@@ -221,7 +221,7 @@ export default function SellerDashboard({ companyId, sellerUser, onLogout }: Sel
             CONEXÃO REAL-TIME ATIVA
           </span>
           <h2 className="text-xl font-bold tracking-tight">Atendimentos de {sellerUser.name}</h2>
-          <p className="text-xs text-slate-400 mt-0.5">Vendedor(a) Autorizado da Loja • CRM AtendePro</p>
+          <p className="text-xs text-slate-400 mt-0.5">Vendedor(a) Autorizado da Loja • CRM</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
@@ -385,7 +385,7 @@ export default function SellerDashboard({ companyId, sellerUser, onLogout }: Sel
               {/* Messages Body */}
               <div className="grow overflow-y-auto p-5 space-y-4" id="messages-panel">
                 {selectedChatMessages.map((m) => {
-                  const isSystem = m.senderName === 'AtendePro Sistema';
+                  const isSystem = m.senderName === 'Sistema';
                   const isSeller = m.senderType === 'seller';
                   
                   if (isSystem) {

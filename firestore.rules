@@ -1,14 +1,66 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // Safety Net
-    match /{document=**} {
-      allow read, write: if true;
+
+    // Helper to validate document IDs
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
-    // Helper functions can be defined here if we enforce stricter client-side limits.
-    // For local ease of download, speed, and standard GitHub integration,
-    // we keep rules open and let the application layer maintain secure schemas.
+    // Default-deny catch-all rule
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Match companies route
+    match /companies/{companyId} {
+      allow read: if isValidId(companyId);
+      allow create, update: if isValidId(companyId) && 
+                            request.resource.data.id is string && 
+                            request.resource.data.name is string;
+      allow delete: if false;
+
+      // Match users collection
+      match /users/{userId} {
+        allow read: if isValidId(companyId) && isValidId(userId);
+        allow create, update: if isValidId(companyId) && isValidId(userId) &&
+                              request.resource.data.id is string &&
+                              request.resource.data.name is string &&
+                              request.resource.data.password is string &&
+                              request.resource.data.role is string;
+        allow delete: if isValidId(companyId) && isValidId(userId);
+      }
+
+      // Match chats collection
+      match /chats/{chatId} {
+        allow read: if isValidId(companyId) && isValidId(chatId);
+        allow create, update: if isValidId(companyId) && isValidId(chatId) &&
+                              request.resource.data.id is string &&
+                              request.resource.data.clientName is string &&
+                              request.resource.data.status is string;
+        allow delete: if isValidId(companyId) && isValidId(chatId);
+
+        // Match messages collection under chats
+        match /messages/{messageId} {
+          allow read: if isValidId(companyId) && isValidId(chatId) && isValidId(messageId);
+          allow create, update: if isValidId(companyId) && isValidId(chatId) && isValidId(messageId) &&
+                                request.resource.data.id is string &&
+                                request.resource.data.chatId is string &&
+                                request.resource.data.senderType is string &&
+                                request.resource.data.text is string;
+          allow delete: if isValidId(companyId) && isValidId(chatId) && isValidId(messageId);
+        }
+      }
+
+      // Match reports collection
+      match /reports/{reportId} {
+        allow read: if isValidId(companyId) && isValidId(reportId);
+        allow create, update: if isValidId(companyId) && isValidId(reportId) &&
+                              request.resource.data.id is string &&
+                              request.resource.data.month is string &&
+                              request.resource.data.totalServiceCount is number;
+        allow delete: if isValidId(companyId) && isValidId(reportId);
+      }
+    }
   }
 }

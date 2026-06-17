@@ -1,4 +1,4 @@
-class AtendeProAlarm {
+class CRMAlarm {
   private audioCtx: AudioContext | null = null;
   private intervalId: any = null;
   private isPlaying = false;
@@ -99,4 +99,4 @@ class AtendeProAlarm {
   }
 }
 
-export const crmAlarm = new AtendeProAlarm();
+export const crmAlarm = new CRMAlarm();
