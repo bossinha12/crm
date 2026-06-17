@@ -13,7 +13,26 @@ import {
 export default function App() {
   const [companyId] = useState('atendepro_default');
   const [company, setCompany] = useState<Company | null>(null);
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(() => {
+    const saved = localStorage.getItem('crm_current_user_atendepro');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.error("Erro ao recuperar sessão:", e);
+      }
+    }
+    return null;
+  });
+
+  // Watch for session changes to persist/remove from localStorage
+  useEffect(() => {
+    if (currentUser) {
+      localStorage.setItem('crm_current_user_atendepro', JSON.stringify(currentUser));
+    } else {
+      localStorage.removeItem('crm_current_user_atendepro');
+    }
+  }, [currentUser]);
   
   // Views navigation selection: 'home' | 'client' | 'login'
   // Defaults to 'client' for immediate customer chat mode

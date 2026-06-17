@@ -239,32 +239,65 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
 
     setIsClearing(true);
     try {
-      // 1. Fetch all chats directly from the server to bypass any cached or stale local state
-      const chatsRef = collection(db, 'companies', companyId, 'chats');
-      const chatSnapshot = await getDocs(chatsRef);
+      // Collect all chat IDs to delete from both local React state AND direct Firestore query
+      const uniqueChatIds = new Set<string>();
+      
+      // 1. Add currently tracked state chats
+      chats.forEach((c) => {
+        if (c.id) uniqueChatIds.add(c.id);
+      });
 
-      // 2. Prepare and execute all deletion processes
-      const deletePromises = chatSnapshot.docs.map(async (chatDoc) => {
-        const chatID = chatDoc.id;
+      // 2. Fetch directly from the server of Firestore to bypass cache / catch others
+      try {
+        const chatsRef = collection(db, 'companies', companyId, 'chats');
+        const chatSnapshot = await getDocs(chatsRef);
+        chatSnapshot.docs.forEach((docItem) => {
+          uniqueChatIds.add(docItem.id);
+        });
+      } catch (err) {
+        console.warn("Could not query server chats collection directly:", err);
+      }
+
+      const idList = Array.from(uniqueChatIds);
+
+      if (idList.length === 0) {
+        // Force state cleanup anyway
+        setChats([]);
+        setMirroredChatId(null);
+        setMirroredMessages([]);
+        alert('Não há conversas ou históricos registrados para apagar.');
+        setIsClearing(false);
+        return;
+      }
+
+      // 3. Prepare and execute all deletion processes
+      const deletePromises = idList.map(async (chatID) => {
+        try {
+          // Fetch and delete all messages in this chat's messages subcollection
+          const messagesRef = collection(db, 'companies', companyId, 'chats', chatID, 'messages');
+          const msgSnapshot = await getDocs(messagesRef);
+          const msgDeletes = msgSnapshot.docs.map((msgDoc) => 
+            deleteDoc(doc(db, 'companies', companyId, 'chats', chatID, 'messages', msgDoc.id))
+          );
+          await Promise.all(msgDeletes);
+        } catch (e) {
+          console.warn(`Erro ao excluir sub-mensagens do chat ${chatID}:`, e);
+        }
         
-        // Fetch and delete all messages in this chat's subcollection
-        const messagesRef = collection(db, 'companies', companyId, 'chats', chatID, 'messages');
-        const msgSnapshot = await getDocs(messagesRef);
-        const msgDeletes = msgSnapshot.docs.map((msgDoc) => 
-          deleteDoc(doc(db, 'companies', companyId, 'chats', chatID, 'messages', msgDoc.id))
-        );
-        await Promise.all(msgDeletes);
-        
-        // Delete the chat document itself
-        await deleteDoc(doc(db, 'companies', companyId, 'chats', chatID));
+        try {
+          // Delete the chat document itself
+          await deleteDoc(doc(db, 'companies', companyId, 'chats', chatID));
+        } catch (e) {
+          console.warn(`Erro ao excluir chat doc ${chatID}:`, e);
+        }
       });
 
       await Promise.all(deletePromises);
 
-      // 3. Clear potential customer active session stored on browsers
+      // 4. Wipe potential customer active session stored on browsers
       localStorage.removeItem('atendepro_client_chat_id');
 
-      // 4. Force empty the local React state for immediate snappy UI rendering
+      // 5. Force update the local React state immediately for snappy rendering
       setChats([]);
       setMirroredChatId(null);
       setMirroredMessages([]);
