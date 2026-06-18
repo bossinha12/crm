@@ -10,6 +10,7 @@ const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 export const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
 }, firebaseConfig.firestoreDatabaseId);
+
 export const auth = getAuth(app);
 
 // Operational Types for diagnostics
