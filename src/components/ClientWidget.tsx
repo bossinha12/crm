@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { doc, setDoc, collection, onSnapshot, query, orderBy, addDoc, updateDoc } from 'firebase/firestore';
+import { doc, setDoc, collection, onSnapshot, query, orderBy, addDoc, updateDoc, getDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { Chat, Message, ChatStatus } from '../types';
 import { Send, MessageSquare, Phone, User, CheckCheck, Landmark, RefreshCw, XCircle } from 'lucide-react';
@@ -58,7 +58,11 @@ export default function ClientWidget({ companyId, companyName, onGoBack }: Clien
       
       // Mark read list for client side (if last message came from seller, write update to chat that customer has seen it)
       if (activeChat && activeChat.lastMessageSender === 'seller' && activeChat.unreadByClient) {
-        updateDoc(chatDocRef, { unreadByClient: false }).catch(err => console.log("Erro auto-read client:", err));
+        getDoc(chatDocRef).then((snap) => {
+          if (snap.exists()) {
+            updateDoc(chatDocRef, { unreadByClient: false }).catch(err => console.log("Erro auto-read client:", err));
+          }
+        }).catch(err => console.log("Erro ao checar chat antes de auto-read client:", err));
       }
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, `companies/${companyId}/chats/${chatId}/messages`);

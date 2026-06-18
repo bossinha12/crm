@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { collection, onSnapshot, query, orderBy, doc, updateDoc, addDoc } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, doc, updateDoc, addDoc, getDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { Chat, User, Message, ChatStatus } from '../types';
 import { crmAlarm } from '../lib/audio';
@@ -94,7 +94,11 @@ export default function SellerDashboard({ companyId, sellerUser, onLogout }: Sel
       const currentChatObj = chats.find(c => c.id === selectedChatId);
       if (currentChatObj && currentChatObj.unreadBySeller) {
         const chatDocRef = doc(db, 'companies', companyId, 'chats', selectedChatId);
-        updateDoc(chatDocRef, { unreadBySeller: false }).catch(err => console.log("Erro auto-read vendedor:", err));
+        getDoc(chatDocRef).then((snap) => {
+          if (snap.exists()) {
+            updateDoc(chatDocRef, { unreadBySeller: false }).catch(err => console.log("Erro auto-read vendedor:", err));
+          }
+        }).catch(err => console.log("Erro ao checar chat antes de auto-read:", err));
       }
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, `companies/${companyId}/chats/${selectedChatId}/messages`);
