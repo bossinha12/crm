@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { collection, onSnapshot, query, orderBy, doc, setDoc, deleteDoc, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, doc, setDoc, deleteDoc, getDocs, getDocsFromServer } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { User, Chat, Message, ChatStatus } from '../types';
 import { 
@@ -228,18 +228,18 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
 
   const handleClearAllData = async () => {
     const firstConfirm = confirm(
-      '⚠️ ATENÇÃO: Você tem certeza que deseja EXCLUIR DEFINITIVAMENTE todos os históricos de atendimento, conversas e mensagens desta empresa? Esta ação é irreversível.'
+      '⚠️ ATENÇÃO: Você tem certeza que deseja EXCLUIR DEFINITIVAMENTE todos os históricos de atendimento, conversas e mensagens desta empresa? Esta ação apagará os dados diretamente no Firestore e é irreversível.'
     );
     if (!firstConfirm) return;
 
     const secondConfirm = confirm(
-      'Confirmar exclusão em massa: Esta ação irá zerar todo o relatório mensal, gráficos e histórico de conversas do banco de dados do Firestore. Deseja prosseguir?'
+      'Confirmar exclusão em massa: Isso irá zerar todos os relatórios, gráficos e históricos de conversas diretamente no servidor, voltando do zero absoluto. Deseja prosseguir de forma definitiva?'
     );
     if (!secondConfirm) return;
 
     setIsClearing(true);
     try {
-      // Collect all chat IDs to delete from both local React state AND direct Firestore query
+      // Collect all chat IDs to delete from both local React state AND direct Firestore server queries
       const uniqueChatIds = new Set<string>();
       
       // 1. Add currently tracked state chats
@@ -247,15 +247,24 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
         if (c.id) uniqueChatIds.add(c.id);
       });
 
-      // 2. Fetch directly from the server of Firestore to bypass cache / catch others
+      // 2. Fetch directly from the server of Firestore to bypass cache / catch any other documents
       try {
         const chatsRef = collection(db, 'companies', companyId, 'chats');
-        const chatSnapshot = await getDocs(chatsRef);
+        const chatSnapshot = await getDocsFromServer(chatsRef);
         chatSnapshot.docs.forEach((docItem) => {
           uniqueChatIds.add(docItem.id);
         });
       } catch (err) {
-        console.warn("Could not query server chats collection directly:", err);
+        console.warn("Could not query server chats collection via getDocsFromServer. Trying standard getDocs as fallback:", err);
+        try {
+          const chatsRef = collection(db, 'companies', companyId, 'chats');
+          const chatSnapshot = await getDocs(chatsRef);
+          chatSnapshot.docs.forEach((docItem) => {
+            uniqueChatIds.add(docItem.id);
+          });
+        } catch (fbErr) {
+          console.error("Failed completely to retrieve chats map:", fbErr);
+        }
       }
 
       const idList = Array.from(uniqueChatIds);
@@ -265,17 +274,23 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
         setChats([]);
         setMirroredChatId(null);
         setMirroredMessages([]);
-        alert('Não há conversas ou históricos registrados para apagar.');
+        alert('Tudo limpo! Não há conversas registradas no servidor.');
         setIsClearing(false);
         return;
       }
 
-      // 3. Prepare and execute all deletion processes
+      // 3. Prepare and execute all deletion processes directly against Firestore
       const deletePromises = idList.map(async (chatID) => {
         try {
-          // Fetch and delete all messages in this chat's messages subcollection
+          // Fetch and delete all messages in this chat's messages subcollection directly using getDocsFromServer
           const messagesRef = collection(db, 'companies', companyId, 'chats', chatID, 'messages');
-          const msgSnapshot = await getDocs(messagesRef);
+          let msgSnapshot;
+          try {
+            msgSnapshot = await getDocsFromServer(messagesRef);
+          } catch (e) {
+            msgSnapshot = await getDocs(messagesRef); // cache/offline fallback
+          }
+
           const msgDeletes = msgSnapshot.docs.map((msgDoc) => 
             deleteDoc(doc(db, 'companies', companyId, 'chats', chatID, 'messages', msgDoc.id))
           );
@@ -294,7 +309,7 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
 
       await Promise.all(deletePromises);
 
-      // 4. Wipe potential customer active session stored on browsers
+      // 4. Wipe active customer chat ID in local storage to force clients back to signup screen
       localStorage.removeItem('atendepro_client_chat_id');
 
       // 5. Force update the local React state immediately for snappy rendering
@@ -302,7 +317,7 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
       setMirroredChatId(null);
       setMirroredMessages([]);
 
-      alert('Todos os dados de atendimentos e históricos de conversas foram excluídos com sucesso do banco de dados!');
+      alert('Dados apagados com sucesso de forma definitiva no servidor Firestore! Reiniciado do zero.');
     } catch (err) {
       console.error('Erro ao excluir dados:', err);
       alert(`Ocorreu um erro ao excluir os dados do Firestore: ${err instanceof Error ? err.message : String(err)}`);
@@ -456,7 +471,7 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
             className={`text-xs bg-rose-950/80 hover:bg-rose-900 border border-rose-800 rounded-xl px-4 py-2 font-bold text-rose-200 flex items-center gap-1.5 transition-all shadow-md shadow-rose-950/20 ${isClearing ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
             <Trash2 className="w-3.5 h-3.5" />
-            <span>{isClearing ? 'Limpando Banco...' : 'Limpar Históricos de Teste'}</span>
+            <span>{isClearing ? 'Apagando Dados...' : 'Apagar Dados'}</span>
           </button>
 
           <button
