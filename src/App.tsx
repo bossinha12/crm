@@ -1,21 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { doc, getDoc, setDoc, collection, getDocs, query, limit } from 'firebase/firestore';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db, testFirestoreConnection } from './lib/firebase';
 import { User, Company } from './types';
 import LoginScreen from './components/LoginScreen';
 import ClientWidget from './components/ClientWidget';
 import SellerDashboard from './components/SellerDashboard';
 import MasterDashboard from './components/MasterDashboard';
-import SaaSAdminDashboard from './components/SaaSAdminDashboard';
 import { 
-  Compass, Headphones, ShieldAlert, Sparkles, LogIn, ChevronRight, HelpCircle, Shield 
+  Compass, Headphones, ShieldAlert, Sparkles, LogIn, ChevronRight, HelpCircle 
 } from 'lucide-react';
 
 export default function App() {
-  const [companyId, setCompanyId] = useState(() => {
-    const params = new URLSearchParams(window.location.search);
-    return params.get('c') || params.get('company') || params.get('id') || 'atendepro_default';
-  });
+  const [companyId] = useState('atendepro_default');
   const [company, setCompany] = useState<Company | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     const saved = localStorage.getItem('crm_current_user_atendepro');
@@ -38,38 +34,10 @@ export default function App() {
     }
   }, [currentUser]);
   
-  // Views navigation selection: 'home' | 'client' | 'login' | 'saas_admin'
+  // Views navigation selection: 'home' | 'client' | 'login'
   // Defaults to 'client' for immediate customer chat mode
-  const [currentView, setCurrentView] = useState<'home' | 'client' | 'login' | 'saas_admin'>('client');
+  const [currentView, setCurrentView] = useState<'home' | 'client' | 'login'>('client');
   const [connecting, setConnecting] = useState(true);
-
-  // Helper utility to safely navigate URL while retaining c / company / id context
-  const updateViewUrl = (view: string, extraUrlStr: string = '') => {
-    const params = new URLSearchParams(window.location.search);
-    const existingC = params.get('c') || params.get('company') || params.get('id');
-    
-    const newParams = new URLSearchParams();
-    newParams.set('view', view);
-    if (existingC) {
-      newParams.set('c', existingC);
-    }
-    if (extraUrlStr) {
-      const extraParams = new URLSearchParams(extraUrlStr);
-      extraParams.forEach((val, key) => {
-        newParams.set(key, val);
-      });
-    }
-    window.history.pushState({}, '', `?${newParams.toString()}`);
-  };
-
-  // Set dynamic browser tab title depending on active view
-  useEffect(() => {
-    if (currentView === 'saas_admin') {
-      document.title = 'SaaS MASTER - Controle Geral';
-    } else {
-      document.title = `${company?.name || 'Larissa Móveis'} - Atendimento Online`;
-    }
-  }, [currentView, company?.name]);
 
   // Parse direct access via URL Query Parameters (e.g. ?view=client, ?view=login, or ?view=portal)
   useEffect(() => {
@@ -79,8 +47,6 @@ export default function App() {
       setCurrentView('login');
     } else if (viewParam === 'portal') {
       setCurrentView('home');
-    } else if (viewParam === 'admmaster') {
-      setCurrentView('saas_admin');
     } else {
       // Default fallback for public customers accessing root URL
       setCurrentView('client');
@@ -98,28 +64,14 @@ export default function App() {
         if (snapshot.exists()) {
           setCompany({ id: snapshot.id, ...snapshot.data() } as Company);
         } else {
-          // Check if there are ANY companies in the database
-          let dbHasCompanies = false;
-          try {
-            const tempSnap = await getDocs(query(collection(db, 'companies'), limit(1)));
-            dbHasCompanies = !tempSnap.empty;
-          } catch (e) {
-            console.warn("Could not check other companies in db:", e);
-          }
-
-          if (!dbHasCompanies) {
-            // Database is totally empty, so it's safe to auto create default metadata
-            const defaultCompany: Company = {
-              id: companyId,
-              name: 'Larissa Móveis',
-              createdAt: new Date().toISOString()
-            };
-            await setDoc(companyDocRef, defaultCompany);
-            setCompany(defaultCompany);
-          } else {
-            // Not empty! This means the company was deleted explicitly. Respect that!
-            setCompany(null);
-          }
+          // Auto create default shop metadata if missing
+          const defaultCompany: Company = {
+            id: companyId,
+            name: 'Larissa Móveis',
+            createdAt: new Date().toISOString()
+          };
+          await setDoc(companyDocRef, defaultCompany);
+          setCompany(defaultCompany);
         }
       } catch (err) {
         // Fallback gracefully without blocking console.error
@@ -147,99 +99,11 @@ export default function App() {
     );
   }
 
-  if (currentView === 'saas_admin') {
-    return (
-      <SaaSAdminDashboard 
-        onBackToPortal={() => {
-          updateViewUrl('portal');
-          setCurrentView('home');
-        }}
-      />
-    );
-  }
-
-  // If company doesn't exist and we're not inside the SaaS Admin, show a clean portal-not-found screen
-  if (!company) {
-    return (
-      <main className="min-h-screen bg-slate-950 flex flex-col justify-center items-center p-6 text-center select-none relative font-sans leading-relaxed">
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[400px] h-[400px] rounded-full bg-rose-500/5 blur-3xl -z-10 pointer-events-none"></div>
-        <div className="max-w-md w-full bg-slate-900 border border-slate-800/80 rounded-3xl p-8 shadow-2xl space-y-6">
-          <div className="mx-auto h-16 w-16 rounded-full bg-rose-950/50 border border-rose-850 flex items-center justify-center text-rose-500">
-            <ShieldAlert className="w-8 h-8 text-rose-450" />
-          </div>
-          <div className="space-y-3">
-            <h2 className="text-xl font-extrabold text-slate-100 tracking-tight">Portal Suspenso ou Indisponível</h2>
-            <div className="text-xs text-rose-200 bg-rose-950/40 border border-rose-900/45 rounded-2xl p-4 text-left leading-relaxed font-semibold">
-              ⚠️ O link de acesso com ID <code className="text-amber-300 font-mono">"{companyId}"</code> não corresponde a nenhuma empresa ativa no sistema ou foi desativado definitivamente pela administração do SaaS.
-            </div>
-          </div>
-          <p className="text-[11px] text-slate-500 leading-relaxed">
-            Se você for o proprietário desse ambiente, consulte a aba de gerenciamento ou entre em contato com o suporte mestre para criar, reativar ou regularizar sua assinatura.
-          </p>
-        </div>
-      </main>
-    );
-  }
-
-  // Render blocked/suspended screen if subscription/payment is missing or expired
-  const isExpired = company?.expiresAt ? new Date() > new Date(company.expiresAt) : false;
-  const isBlocked = company?.status === 'blocked' || isExpired;
-
-  if (isBlocked) {
-    const blockMessage = company?.status === 'blocked' 
-      ? company.blockMessage 
-      : "⚠️ Este portal de atendimento está temporariamente suspenso devido ao término da licença de 30 dias úteis/corridos. Entre em contato com a administração mestre do SaaS para efetuar a renovação.";
-
-    return (
-      <main className="min-h-screen bg-slate-950 flex flex-col justify-center items-center p-6 text-center select-none relative font-sans leading-relaxed">
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[400px] h-[400px] rounded-full bg-rose-500/5 blur-3xl -z-10 pointer-events-none"></div>
-        <div className="max-w-md w-full bg-slate-900 border border-slate-800/80 rounded-3xl p-8 shadow-2xl space-y-6">
-          <div className="mx-auto h-16 w-16 rounded-full bg-rose-950/50 border border-rose-850 flex items-center justify-center text-rose-500">
-            <ShieldAlert className="w-8 h-8 animate-pulse text-rose-400" />
-          </div>
-          <div className="space-y-3">
-            <h2 className="text-xl font-extrabold text-slate-100 tracking-tight">Portal Suspenso</h2>
-            <div className="text-xs text-rose-200 bg-rose-950/40 border border-rose-900/45 rounded-2xl p-4 text-left leading-relaxed font-medium">
-              {blockMessage || "⚠️ Este portal de atendimento está temporariamente suspenso devido a pendências de assinatura ou manutenção cadastral. Entre em contato com o suporte técnico para reestabelecer o serviço."}
-            </div>
-          </div>
-          <p className="text-[11px] text-slate-500">
-            Se você for o proprietário desse ambiente, contate o atendimento para regularizar e reativar imediatamente.
-          </p>
-        </div>
-      </main>
-    );
-  }
-
   // Render Logged-In CRM consoles
   if (currentUser) {
-    // Check if license is expiring soon (<= 3 days and > 0 days)
-    const hasExpiryWarning = (() => {
-      if (!company?.expiresAt) return false;
-      const t = new Date(company.expiresAt).getTime() - Date.now();
-      const d = Math.ceil(t / (1000 * 60 * 60 * 24));
-      return d > 0 && d <= 3;
-    })();
-
-    const daysLeft = company?.expiresAt 
-      ? Math.ceil((new Date(company.expiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24)) 
-      : 0;
-
     return (
       <main className="min-h-screen bg-slate-100 flex flex-col p-4 sm:p-6 lg:p-8 font-sans">
-        <div className="max-w-7xl w-full mx-auto flex-1 flex flex-col select-none space-y-4">
-          {hasExpiryWarning && currentUser.role === 'admin' && (
-            <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-2xl p-4 flex items-center gap-3 shadow-md text-xs sm:text-sm animate-pulse">
-              <ShieldAlert className="w-5 h-5 text-amber-600 shrink-0 animate-bounce" />
-              <div className="flex-1">
-                <span className="font-extrabold block text-amber-900 text-sm">Falta pouco para expirar! ⏰</span>
-                <span className="text-amber-800 font-medium text-xs block mt-0.5">
-                  Restam apenas <strong className="font-bold">{daysLeft} {daysLeft === 1 ? 'dia' : 'dias'}</strong> de uso do seu painel ({company?.expiresAt ? new Date(company.expiresAt).toLocaleDateString('pt-BR') : ''}). Renove sua assinatura agora com o suporte administrativo para evitar bloqueios automáticos.
-                </span>
-              </div>
-            </div>
-          )}
-
+        <div className="max-w-7xl w-full mx-auto flex-1 flex flex-col select-none">
           {currentUser.role === 'admin' ? (
             <MasterDashboard 
               companyId={companyId} 
@@ -270,7 +134,7 @@ export default function App() {
           companyName={company?.name || 'Larissa Móveis'} 
           onGoBack={hasPortalAccess ? () => {
             // Remove parameter on return
-            updateViewUrl('portal');
+            window.history.pushState({}, '', '?view=portal');
             setCurrentView('home');
           } : undefined} 
         />
@@ -289,7 +153,7 @@ export default function App() {
           <div className="absolute top-4 left-4">
             <button
               onClick={() => {
-                updateViewUrl('portal');
+                window.history.pushState({}, '', '?view=portal');
                 setCurrentView('home');
               }}
               className="text-xs font-semibold bg-white border border-slate-200 text-slate-500 hover:text-slate-800 px-3.5 py-2 rounded-xl transition-all cursor-pointer"
@@ -321,7 +185,7 @@ export default function App() {
             <Compass className="h-6 w-6" id="welcome-compass-icon" />
           </div>
           <h1 className="text-4xl sm:text-5xl font-extrabold text-slate-900 tracking-tight text-balance">
-            {company?.name || 'Larissa Móveis'} <span className="text-indigo-600 block sm:inline">Atendimento Online</span>
+            Larissa Móveis <span className="text-indigo-600 block sm:inline">Atendimento Online</span>
           </h1>
           <p className="text-sm sm:text-base text-slate-500 max-w-lg mx-auto">
             Seu canal de atendimento direto. Fale conosco agora em tempo real com total praticidade e rapidez.
@@ -334,7 +198,7 @@ export default function App() {
           {/* Card 1: Customer Entrance point */}
           <button
             onClick={() => {
-              updateViewUrl('client', 'portal=true');
+              window.history.pushState({}, '', '?view=client&portal=true');
               setCurrentView('client');
             }}
             className="text-left group relative bg-white border border-slate-200 hover:border-indigo-500 rounded-3xl p-6 shadow-xl shadow-slate-100 transition-all hover:-translate-y-1 block duration-300 cursor-pointer"
@@ -357,7 +221,7 @@ export default function App() {
           {/* Card 2: Company Employee Area entrance point */}
           <button
             onClick={() => {
-              updateViewUrl('login', 'portal=true');
+              window.history.pushState({}, '', '?view=login&portal=true');
               setCurrentView('login');
             }}
             className="text-left group relative bg-white border border-slate-200 hover:border-indigo-500 rounded-3xl p-6 shadow-xl shadow-slate-100 transition-all hover:-translate-y-1 block duration-300 cursor-pointer"
@@ -380,11 +244,9 @@ export default function App() {
         </div>
 
         {/* Informative Footer Badge and system specs */}
-        <div className="text-[11px] text-slate-400 flex flex-col justify-center items-center gap-2">
-          <div className="flex justify-center items-center gap-1">
-            <HelpCircle className="w-3.5 h-3.5" />
-            <span>Fidelidade instantânea de conexões e sincronização em tempo real via Firestore</span>
-          </div>
+        <div className="text-[11px] text-slate-400 flex justify-center items-center gap-1">
+          <HelpCircle className="w-3.5 h-3.5" />
+          <span>Fidelidade instantânea de conexões e sincronização em tempo real via Firestore</span>
         </div>
 
       </div>
@@ -392,5 +254,3 @@ export default function App() {
     </main>
   );
 }
-
-// Pequeno ajuste para forçar o rastreador de modificações do AI Studio (GitHub Sync)

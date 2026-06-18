@@ -8,10 +8,6 @@ export interface Company {
   id: string;
   name: string;
   createdAt: string;
-  status?: 'active' | 'blocked';
-  blockMessage?: string;
-  plan?: string;
-  expiresAt?: string;
 }
 
 export interface User {

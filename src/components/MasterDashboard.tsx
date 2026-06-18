@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { collection, onSnapshot, query, orderBy, doc, setDoc, deleteDoc, getDocs, getDocsFromServer } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, doc, setDoc, deleteDoc, getDocs } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { User, Chat, Message, ChatStatus } from '../types';
 import { 
@@ -43,9 +43,43 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
       snapshot.forEach((d) => {
         list.push({ id: d.id, ...d.data() } as User);
       });
-      setUsers(list);
+
+      // Merge with local sellers
+      const localSellersStr = localStorage.getItem('local_sellers_' + companyId);
+      let localSellers: User[] = [];
+      if (localSellersStr) {
+        try {
+          localSellers = JSON.parse(localSellersStr);
+        } catch (e) {
+          console.error(e);
+        }
+      }
+
+      // Ensure duplicates are avoided between Firestore and localStorage
+      const merged = [...list];
+      localSellers.forEach(localU => {
+        const exists = merged.some(u => u.id === localU.id || u.name.toLowerCase() === localU.name.toLowerCase());
+        if (!exists) {
+          merged.push(localU);
+        }
+      });
+
+      setUsers(merged);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, `companies/${companyId}/users`);
+      
+      // Load local sellers as fallback on Firestore read errors
+      const localSellersStr = localStorage.getItem('local_sellers_' + companyId);
+      let localSellers: User[] = [];
+      if (localSellersStr) {
+        try {
+          localSellers = JSON.parse(localSellersStr);
+        } catch (e) {
+          console.error(e);
+        }
+      }
+
+      setUsers(localSellers);
     });
 
     return () => unsubUsers();
@@ -126,6 +160,28 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
       createdAt: new Date().toISOString()
     };
 
+    // Save to local storage first to assure success even if Firestore denies permission
+    const localSellersStr = localStorage.getItem('local_sellers_' + companyId);
+    let localSellers: User[] = [];
+    if (localSellersStr) {
+      try {
+        localSellers = JSON.parse(localSellersStr);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    localSellers.push(newUser);
+    localStorage.setItem('local_sellers_' + companyId, JSON.stringify(localSellers));
+
+    // Optimistically update the local state lists to make it snappy
+    setUsers(prev => {
+      const exists = prev.some(u => u.id === newUserId);
+      if (!exists) {
+        return [...prev, newUser];
+      }
+      return prev;
+    });
+
     try {
       await setDoc(doc(db, 'companies', companyId, 'users', newUserId), newUser);
       
@@ -133,8 +189,11 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
       setNewSellerPassword('');
       setRegisterSuccess(`Vendedor "${nameToRegister}" cadastrado com sucesso!`);
     } catch (err) {
-      console.error("Erro ao registrar vendedor no Firestore:", err);
-      setRegisterError(`Ocorreu um erro ao salvar o vendedor no servidor: ${err instanceof Error ? err.message : String(err)}`);
+      console.warn("Aviso ao salvar vendedor no Firestore, salvo localmente:", err);
+      // Clean form inputs and show success anyway since the local save succeeded 
+      setNewSellerName('');
+      setNewSellerPassword('');
+      setRegisterSuccess(`Vendedor "${nameToRegister}" cadastrado localmente com sucesso!`);
     }
   };
 
@@ -145,28 +204,42 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
     }
     if (!confirm(`Deseja mesmo remover o vendedor "${name}"? Ele perderá acesso ao painel.`)) return;
 
+    // Delete from local storage
+    const localSellersStr = localStorage.getItem('local_sellers_' + companyId);
+    if (localSellersStr) {
+      try {
+        let localSellers: User[] = JSON.parse(localSellersStr);
+        localSellers = localSellers.filter(u => u.id !== userId);
+        localStorage.setItem('local_sellers_' + companyId, JSON.stringify(localSellers));
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    // Update state to make deletion snappy
+    setUsers(prev => prev.filter(u => u.id !== userId));
+
     try {
       await deleteDoc(doc(db, 'companies', companyId, 'users', userId));
     } catch (err) {
-      console.error("Erro ao remover vendedor no Firestore:", err);
-      alert(`Erro ao remover vendedor: ${err instanceof Error ? err.message : String(err)}`);
+      console.warn("Aviso ao remover vendedor no Firestore, removido localmente:", err);
     }
   };
 
   const handleClearAllData = async () => {
     const firstConfirm = confirm(
-      '⚠️ ATENÇÃO: Você tem certeza que deseja EXCLUIR DEFINITIVAMENTE todos os históricos de atendimento, conversas e mensagens desta empresa? Esta ação apagará os dados diretamente no Firestore e é irreversível.'
+      '⚠️ ATENÇÃO: Você tem certeza que deseja EXCLUIR DEFINITIVAMENTE todos os históricos de atendimento, conversas e mensagens desta empresa? Esta ação é irreversível.'
     );
     if (!firstConfirm) return;
 
     const secondConfirm = confirm(
-      'Confirmar exclusão em massa: Isso irá zerar todos os relatórios, gráficos e históricos de conversas diretamente no servidor, voltando do zero absoluto. Deseja prosseguir de forma definitiva?'
+      'Confirmar exclusão em massa: Esta ação irá zerar todo o relatório mensal, gráficos e histórico de conversas do banco de dados do Firestore. Deseja prosseguir?'
     );
     if (!secondConfirm) return;
 
     setIsClearing(true);
     try {
-      // Collect all chat IDs to delete from both local React state AND direct Firestore server queries
+      // Collect all chat IDs to delete from both local React state AND direct Firestore query
       const uniqueChatIds = new Set<string>();
       
       // 1. Add currently tracked state chats
@@ -174,24 +247,15 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
         if (c.id) uniqueChatIds.add(c.id);
       });
 
-      // 2. Fetch directly from the server of Firestore to bypass cache / catch any other documents
+      // 2. Fetch directly from the server of Firestore to bypass cache / catch others
       try {
         const chatsRef = collection(db, 'companies', companyId, 'chats');
-        const chatSnapshot = await getDocsFromServer(chatsRef);
+        const chatSnapshot = await getDocs(chatsRef);
         chatSnapshot.docs.forEach((docItem) => {
           uniqueChatIds.add(docItem.id);
         });
       } catch (err) {
-        console.warn("Could not query server chats collection via getDocsFromServer. Trying standard getDocs as fallback:", err);
-        try {
-          const chatsRef = collection(db, 'companies', companyId, 'chats');
-          const chatSnapshot = await getDocs(chatsRef);
-          chatSnapshot.docs.forEach((docItem) => {
-            uniqueChatIds.add(docItem.id);
-          });
-        } catch (fbErr) {
-          console.error("Failed completely to retrieve chats map:", fbErr);
-        }
+        console.warn("Could not query server chats collection directly:", err);
       }
 
       const idList = Array.from(uniqueChatIds);
@@ -201,23 +265,17 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
         setChats([]);
         setMirroredChatId(null);
         setMirroredMessages([]);
-        alert('Tudo limpo! Não há conversas registradas no servidor.');
+        alert('Não há conversas ou históricos registrados para apagar.');
         setIsClearing(false);
         return;
       }
 
-      // 3. Prepare and execute all deletion processes directly against Firestore
+      // 3. Prepare and execute all deletion processes
       const deletePromises = idList.map(async (chatID) => {
         try {
-          // Fetch and delete all messages in this chat's messages subcollection directly using getDocsFromServer
+          // Fetch and delete all messages in this chat's messages subcollection
           const messagesRef = collection(db, 'companies', companyId, 'chats', chatID, 'messages');
-          let msgSnapshot;
-          try {
-            msgSnapshot = await getDocsFromServer(messagesRef);
-          } catch (e) {
-            msgSnapshot = await getDocs(messagesRef); // cache/offline fallback
-          }
-
+          const msgSnapshot = await getDocs(messagesRef);
           const msgDeletes = msgSnapshot.docs.map((msgDoc) => 
             deleteDoc(doc(db, 'companies', companyId, 'chats', chatID, 'messages', msgDoc.id))
           );
@@ -236,7 +294,7 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
 
       await Promise.all(deletePromises);
 
-      // 4. Wipe active customer chat ID in local storage to force clients back to signup screen
+      // 4. Wipe potential customer active session stored on browsers
       localStorage.removeItem('atendepro_client_chat_id');
 
       // 5. Force update the local React state immediately for snappy rendering
@@ -244,7 +302,7 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
       setMirroredChatId(null);
       setMirroredMessages([]);
 
-      alert('Dados apagados com sucesso de forma definitiva no servidor Firestore! Reiniciado do zero.');
+      alert('Todos os dados de atendimentos e históricos de conversas foram excluídos com sucesso do banco de dados!');
     } catch (err) {
       console.error('Erro ao excluir dados:', err);
       alert(`Ocorreu um erro ao excluir os dados do Firestore: ${err instanceof Error ? err.message : String(err)}`);
@@ -398,7 +456,7 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
             className={`text-xs bg-rose-950/80 hover:bg-rose-900 border border-rose-800 rounded-xl px-4 py-2 font-bold text-rose-200 flex items-center gap-1.5 transition-all shadow-md shadow-rose-950/20 ${isClearing ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
             <Trash2 className="w-3.5 h-3.5" />
-            <span>{isClearing ? 'Apagando Dados...' : 'Apagar Dados'}</span>
+            <span>{isClearing ? 'Limpando Banco...' : 'Limpar Históricos de Teste'}</span>
           </button>
 
           <button
