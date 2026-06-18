@@ -214,13 +214,43 @@ export default function SaaSAdminDashboard({ onBackToPortal }: SaaSAdminDashboar
     if (!secondConfirm) return;
 
     try {
+      // 1. Fetch and delete all users under this company
+      const usersRef = collection(db, 'companies', company.id, 'users');
+      const usersSnap = await getDocs(usersRef);
+      const userDeletes = usersSnap.docs.map(uDoc => 
+        deleteDoc(doc(db, 'companies', company.id, 'users', uDoc.id))
+      );
+      await Promise.all(userDeletes);
+
+      // 2. Fetch all chats under this company
+      const chatsRef = collection(db, 'companies', company.id, 'chats');
+      const chatsSnap = await getDocs(chatsRef);
+
+      // 3. For each chat, fetch and delete its messages, then delete the chat itself
+      const chatDeletes = chatsSnap.docs.map(async (cDoc) => {
+        // Delete all messages in the subcollection
+        const messagesRef = collection(db, 'companies', company.id, 'chats', cDoc.id, 'messages');
+        const msgsSnap = await getDocs(messagesRef);
+        const msgDeletes = msgsSnap.docs.map(mDoc => 
+          deleteDoc(doc(db, 'companies', company.id, 'chats', cDoc.id, 'messages', mDoc.id))
+        );
+        await Promise.all(msgDeletes);
+
+        // Delete the chat document
+        await deleteDoc(doc(db, 'companies', company.id, 'chats', cDoc.id));
+      });
+      await Promise.all(chatDeletes);
+
+      // 4. Finally, delete the company main document itself
       const ref = doc(db, 'companies', company.id);
       await deleteDoc(ref);
+
+      // Wipe local state
       setCompanies((prev) => prev.filter((c) => c.id !== company.id));
-      alert(`Empresa "${company.name}" deletada com sucesso!`);
+      alert(`Empresa "${company.name}" e todos os seus subdiretórios de usuários, chats e mensagens foram excluídos em definitivo!`);
     } catch (err) {
-      console.error('Erro ao deletar:', err);
-      alert('Erro ao deletar empresa do banco.');
+      console.error('Erro ao deletar tudo:', err);
+      alert(`Ocorreu um erro ao excluir todos os subdiretórios da empresa: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 

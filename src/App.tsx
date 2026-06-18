@@ -43,6 +43,25 @@ export default function App() {
   const [currentView, setCurrentView] = useState<'home' | 'client' | 'login' | 'saas_admin'>('client');
   const [connecting, setConnecting] = useState(true);
 
+  // Helper utility to safely navigate URL while retaining c / company / id context
+  const updateViewUrl = (view: string, extraUrlStr: string = '') => {
+    const params = new URLSearchParams(window.location.search);
+    const existingC = params.get('c') || params.get('company') || params.get('id');
+    
+    const newParams = new URLSearchParams();
+    newParams.set('view', view);
+    if (existingC) {
+      newParams.set('c', existingC);
+    }
+    if (extraUrlStr) {
+      const extraParams = new URLSearchParams(extraUrlStr);
+      extraParams.forEach((val, key) => {
+        newParams.set(key, val);
+      });
+    }
+    window.history.pushState({}, '', `?${newParams.toString()}`);
+  };
+
   // Set dynamic browser tab title depending on active view
   useEffect(() => {
     if (currentView === 'saas_admin') {
@@ -132,7 +151,7 @@ export default function App() {
     return (
       <SaaSAdminDashboard 
         onBackToPortal={() => {
-          window.history.pushState({}, '', '?view=portal');
+          updateViewUrl('portal');
           setCurrentView('home');
         }}
       />
@@ -251,7 +270,7 @@ export default function App() {
           companyName={company?.name || 'Larissa Móveis'} 
           onGoBack={hasPortalAccess ? () => {
             // Remove parameter on return
-            window.history.pushState({}, '', '?view=portal');
+            updateViewUrl('portal');
             setCurrentView('home');
           } : undefined} 
         />
@@ -270,7 +289,7 @@ export default function App() {
           <div className="absolute top-4 left-4">
             <button
               onClick={() => {
-                window.history.pushState({}, '', '?view=portal');
+                updateViewUrl('portal');
                 setCurrentView('home');
               }}
               className="text-xs font-semibold bg-white border border-slate-200 text-slate-500 hover:text-slate-800 px-3.5 py-2 rounded-xl transition-all cursor-pointer"
@@ -315,7 +334,7 @@ export default function App() {
           {/* Card 1: Customer Entrance point */}
           <button
             onClick={() => {
-              window.history.pushState({}, '', '?view=client&portal=true');
+              updateViewUrl('client', 'portal=true');
               setCurrentView('client');
             }}
             className="text-left group relative bg-white border border-slate-200 hover:border-indigo-500 rounded-3xl p-6 shadow-xl shadow-slate-100 transition-all hover:-translate-y-1 block duration-300 cursor-pointer"
@@ -338,7 +357,7 @@ export default function App() {
           {/* Card 2: Company Employee Area entrance point */}
           <button
             onClick={() => {
-              window.history.pushState({}, '', '?view=login&portal=true');
+              updateViewUrl('login', 'portal=true');
               setCurrentView('login');
             }}
             className="text-left group relative bg-white border border-slate-200 hover:border-indigo-500 rounded-3xl p-6 shadow-xl shadow-slate-100 transition-all hover:-translate-y-1 block duration-300 cursor-pointer"
