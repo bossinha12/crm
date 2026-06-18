@@ -34,6 +34,7 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
   // Active Menu Tabs: 'analytics' | 'sellers' | 'live-feeds'
   const [activeTab, setActiveTab] = useState<'analytics' | 'sellers' | 'live-feeds'>('analytics');
   const [isClearing, setIsClearing] = useState(false);
+  const [oldAndClosedChats, setOldAndClosedChats] = useState<Chat[]>([]);
 
   // Load all users (Vendedores) in real time
   useEffect(() => {
@@ -103,6 +104,22 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
     return () => unsubChats();
   }, [companyId]);
 
+  // Detect chats older than 30 days
+  useEffect(() => {
+    if (chats.length === 0) {
+      setOldAndClosedChats([]);
+      return;
+    }
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    const candidates = chats.filter(c => {
+      const d = c.createdAt ? new Date(c.createdAt) : (c.updatedAt ? new Date(c.updatedAt) : new Date());
+      return d < thirtyDaysAgo;
+    });
+    setOldAndClosedChats(candidates);
+  }, [chats]);
+
   // Mirror specified active customer chat thread in real-time
   useEffect(() => {
     if (!mirroredChatId) {
@@ -137,10 +154,9 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
     setRegisterSuccess(null);
 
     const nameToRegister = newSellerName.trim();
-    const passToRegister = newSellerPassword.trim();
 
-    if (!nameToRegister || !passToRegister) {
-      setRegisterError('Preencha o nome e senha do novo vendedor.');
+    if (!nameToRegister) {
+      setRegisterError('Preencha o nome do novo vendedor.');
       return;
     }
 
@@ -155,7 +171,6 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
     const newUser: User = {
       id: newUserId,
       name: nameToRegister,
-      password: passToRegister,
       role: 'seller',
       createdAt: new Date().toISOString()
     };
@@ -311,12 +326,103 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
     }
   };
 
+  const handleDeleteChat = async (chatIdToDelete: string) => {
+    if (!confirm('Deseja realmente apagar esta conversa do banco de dados de forma definitiva?')) return;
+    try {
+      setIsClearing(true);
+      // Fetch and delete all messages first
+      const msgsRef = collection(db, 'companies', companyId, 'chats', chatIdToDelete, 'messages');
+      const snap = await getDocs(msgsRef);
+      const deletes = snap.docs.map(m => deleteDoc(doc(db, 'companies', companyId, 'chats', chatIdToDelete, 'messages', m.id)));
+      await Promise.all(deletes);
+
+      // Delete the chat itself
+      await deleteDoc(doc(db, 'companies', companyId, 'chats', chatIdToDelete));
+      
+      if (mirroredChatId === chatIdToDelete) {
+        setMirroredChatId(null);
+        setMirroredMessages([]);
+      }
+      alert('Atendimento apagado com sucesso!');
+    } catch (err) {
+      console.error('Erro ao excluir atendimento individual:', err);
+      alert('Ocorreu um erro ao tentar excluir o atendimento.');
+    } finally {
+      setIsClearing(false);
+    }
+  };
+
+  const handleClearClosedChats = async () => {
+    const closed = chats.filter(c => c.status === ChatStatus.CLOSED);
+    if (closed.length === 0) {
+      alert('Não há atendimentos concluídos para limpar.');
+      return;
+    }
+    if (!confirm(`Deseja mesmo apagar todos os ${closed.length} atendimentos CONCLUÍDOS do banco de dados para manter seu painel limpo e profissional?`)) return;
+
+    try {
+      setIsClearing(true);
+      const deletes = closed.map(async (c) => {
+        const msgsRef = collection(db, 'companies', companyId, 'chats', c.id, 'messages');
+        const snap = await getDocs(msgsRef);
+        await Promise.all(snap.docs.map(d => deleteDoc(doc(db, 'companies', companyId, 'chats', c.id, 'messages', d.id))));
+        await deleteDoc(doc(db, 'companies', companyId, 'chats', c.id));
+      });
+      await Promise.all(deletes);
+      alert('Seu painel foi limpo! Todos os atendimentos concluídos foram removidos do histórico.');
+    } catch (err) {
+      console.error('Erro ao limpar concluídos:', err);
+    } finally {
+      setIsClearing(false);
+    }
+  };
+
+  const handlePurgeOldChats = async () => {
+    if (oldAndClosedChats.length === 0) {
+      alert('Nenhum atendimento com mais de 30 dias foi encontrado.');
+      return;
+    }
+
+    const count = oldAndClosedChats.length;
+    const wantsPdf = confirm(`⚠️ ALERTA: Você possui ${count} atendimentos antigos (com mais de 30 dias).\nDeseja GERAR E BAIXAR o Relatório de Desempenho Geral em PDF antes de excluí-los?`);
+    
+    if (wantsPdf) {
+      handlePrintPdf();
+    }
+
+    const confirmPurge = confirm(`Confirmar Limpeza automática: Deseja apagar definitivamente todos esses ${count} atendimentos antigos de 30 dias do banco de dados do Firebase para otimizar e limpar sua tela?`);
+    if (!confirmPurge) return;
+
+    try {
+      setIsClearing(true);
+      const deletes = oldAndClosedChats.map(async (c) => {
+        const msgsRef = collection(db, 'companies', companyId, 'chats', c.id, 'messages');
+        const snap = await getDocs(msgsRef);
+        await Promise.all(snap.docs.map(d => deleteDoc(doc(db, 'companies', companyId, 'chats', c.id, 'messages', d.id))));
+        await deleteDoc(doc(db, 'companies', companyId, 'chats', c.id));
+      });
+      await Promise.all(deletes);
+      alert(`Limpeza concluída! ${count} registros antigos foram apagados com sucesso.`);
+    } catch (err) {
+      console.error('Erro no expurgo de logs antigos:', err);
+    } finally {
+      setIsClearing(false);
+    }
+  };
+
   // Compile salesperson Recharts data & Metrics
   const compiledChartData = users
     .filter(u => u.role === 'seller')
     .map(u => {
-      const totalAttended = chats.filter(c => c.sellerId === u.id).length;
-      const closedCount = chats.filter(c => c.sellerId === u.id && c.status === ChatStatus.CLOSED).length;
+      const sellerLowerName = u.name.trim().toLowerCase();
+      const totalAttended = chats.filter(c => 
+        c.sellerId === u.id || 
+        (c.sellerName && c.sellerName.trim().toLowerCase() === sellerLowerName)
+      ).length;
+      const closedCount = chats.filter(c => 
+        (c.sellerId === u.id || (c.sellerName && c.sellerName.trim().toLowerCase() === sellerLowerName)) && 
+        c.status === ChatStatus.CLOSED
+      ).length;
       return {
         name: u.name,
         Total: totalAttended,
@@ -340,9 +446,19 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
     const rowsHtml = users
       .filter(u => u.role === 'seller')
       .map((u, i) => {
-        const total = chats.filter(c => c.sellerId === u.id).length;
-        const closed = chats.filter(c => c.sellerId === u.id && c.status === ChatStatus.CLOSED).length;
-        const active = chats.filter(c => c.sellerId === u.id && c.status === ChatStatus.ACTIVE).length;
+        const sellerLowerName = u.name.trim().toLowerCase();
+        const total = chats.filter(c => 
+          c.sellerId === u.id || 
+          (c.sellerName && c.sellerName.trim().toLowerCase() === sellerLowerName)
+        ).length;
+        const closed = chats.filter(c => 
+          (c.sellerId === u.id || (c.sellerName && c.sellerName.trim().toLowerCase() === sellerLowerName)) && 
+          c.status === ChatStatus.CLOSED
+        ).length;
+        const active = chats.filter(c => 
+          (c.sellerId === u.id || (c.sellerName && c.sellerName.trim().toLowerCase() === sellerLowerName)) && 
+          c.status === ChatStatus.ACTIVE
+        ).length;
         const pct = total > 0 ? Math.round((closed / total) * 100) : 0;
         return `
           <tr style="border-bottom: 1px solid #e2e8f0; font-size: 13px;">
@@ -538,6 +654,28 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
         </button>
       </div>
 
+      {/* 30 Days Auto purging / cleaner helper banner */}
+      {oldAndClosedChats.length > 0 && (
+        <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4.5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-sm shrink-0">
+          <div className="flex items-start gap-3">
+            <span className="text-xl mt-0.5">⚠️</span>
+            <div>
+              <p className="text-xs font-extrabold text-amber-900 uppercase tracking-wider">Limpeza Automática de Atendimentos</p>
+              <p className="text-xs text-amber-700 mt-1 leading-relaxed">
+                Identificamos <strong>{oldAndClosedChats.length} atendimentos históricos arquivados/antigos com mais de 30 dias</strong> no Firebase. Para manter os gráficos de desempenho limpos e rápidos, salve-os e expurgue-os de forma profissional.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={handlePurgeOldChats}
+            disabled={isClearing}
+            className="text-xs bg-amber-600 hover:bg-amber-700 text-white font-bold py-2.5 px-4 rounded-xl transition-all shadow-md shadow-amber-200/50 whitespace-nowrap cursor-pointer hover:scale-105 active:scale-95"
+          >
+            📄 Salvar PDF e Limpar Antigos (30 Dias)
+          </button>
+        </div>
+      )}
+
       {/* Tab Contents */}
       <div className="grow">
         
@@ -589,8 +727,15 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
                   {users
                     .filter(u => u.role === 'seller')
                     .map((item) => {
-                      const total = chats.filter(c => c.sellerId === item.id).length;
-                      const closed = chats.filter(c => c.sellerId === item.id && c.status === ChatStatus.CLOSED).length;
+                      const sellerLowerName = item.name.trim().toLowerCase();
+                      const total = chats.filter(c => 
+                        c.sellerId === item.id || 
+                        (c.sellerName && c.sellerName.trim().toLowerCase() === sellerLowerName)
+                      ).length;
+                      const closed = chats.filter(c => 
+                        (c.sellerId === item.id || (c.sellerName && c.sellerName.trim().toLowerCase() === sellerLowerName)) && 
+                        c.status === ChatStatus.CLOSED
+                      ).length;
                       return (
                         <div key={item.id} className="p-3 border border-slate-50 bg-slate-50/40 rounded-xl flex items-center justify-between gap-4">
                           <div>
@@ -628,30 +773,44 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
             
             {/* Conversations list column on left (Lg: col-span-5) */}
             <div className="lg:col-span-5 bg-white border border-slate-100 rounded-2xl shadow-xl p-4 flex flex-col h-[400px]">
-              <h3 className="text-slate-800 font-extrabold text-sm tracking-tight mb-3">CONVERSAS ATIVAS</h3>
+              <div className="flex justify-between items-center mb-3">
+                <h3 className="text-slate-800 font-extrabold text-sm tracking-tight">CONVERSAS ATIVAS</h3>
+                <button
+                  type="button"
+                  onClick={handleClearClosedChats}
+                  disabled={isClearing}
+                  className="text-[10px] bg-slate-100 hover:bg-rose-50 text-slate-600 hover:text-rose-600 font-bold px-2.5 py-1 rounded-lg border border-slate-200 hover:border-rose-200 transition-all cursor-pointer whitespace-nowrap"
+                  title="Apagar todas as conversas concluídas/arquivadas definitivamente do Firestore para liberar espaço"
+                >
+                  🧹 Limpar Concluídos
+                </button>
+              </div>
               
               {chats.length === 0 ? (
                 <div className="grow flex items-center justify-center text-center text-slate-400 text-xs border border-dashed border-slate-100 rounded-xl py-6">
                   Nenhuma conversa encontrada no CRM.
                 </div>
               ) : (
-                <div className="space-y-2 overflow-y-auto grow">
+                <div className="space-y-2 overflow-y-auto grow pr-1">
                   {chats.map((c) => {
                     const isSelected = c.id === mirroredChatId;
                     const cStatus = c.status;
                     return (
-                      <button
+                      <div
                         key={c.id}
-                        onClick={() => setMirroredChatId(c.id)}
-                        className={`w-full text-left p-3 rounded-xl border flex items-center justify-between gap-4 transition-all cursor-pointer ${
-                          isSelected ? 'border-indigo-500 bg-indigo-50/10' : 'border-slate-50 hover:bg-slate-50/50'
+                        className={`w-full p-3 rounded-xl border flex items-center justify-between gap-3 transition-all ${
+                          isSelected ? 'border-indigo-500 bg-indigo-50/10' : 'border-slate-100 bg-white hover:bg-slate-50/40'
                         }`}
                       >
-                        <div className="min-w-0">
+                        <button
+                          type="button"
+                          onClick={() => setMirroredChatId(c.id)}
+                          className="min-w-0 flex-1 text-left cursor-pointer focus:outline-none"
+                        >
                           <p className="text-sm font-semibold text-slate-800 truncate">{c.clientName}</p>
                           <p className="text-[10px] text-slate-400 mt-0.5 truncate">{c.lastMessage}</p>
-                        </div>
-                        <div className="text-right shrink-0">
+                        </button>
+                        <div className="flex items-center gap-1.5 shrink-0">
                           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
                             cStatus === ChatStatus.NEW ? 'bg-amber-100 text-amber-700' :
                             cStatus === ChatStatus.ACTIVE ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'
@@ -659,8 +818,19 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
                             {cStatus === ChatStatus.NEW ? 'FILA' :
                              cStatus === ChatStatus.ACTIVE ? `C/ ${c.sellerName?.split(' ')[0]}` : 'CONCLUÍDO'}
                           </span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteChat(c.id);
+                            }}
+                            className="p-1 px-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 border border-transparent hover:border-rose-100 transition-all cursor-pointer"
+                            title="Excluir Atendimento do banco"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </div>
-                      </button>
+                      </div>
                     );
                   })}
                 </div>
@@ -730,7 +900,7 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
                     <div key={item.id} className="p-3.5 border border-slate-100 hover:border-slate-200 rounded-xl flex items-center justify-between gap-4">
                       <div>
                         <p className="font-bold text-slate-800 text-sm">{item.name}</p>
-                        <p className="text-xs text-slate-400 font-mono mt-0.5">Login: {item.name} | Senha: {item.password}</p>
+                        <p className="text-xs text-slate-500 font-medium mt-0.5">Acesso Liberado • Basta digitar "{item.name}" para entrar sem senha</p>
                       </div>
                       <button
                         onClick={() => handleDeleteSeller(item.id, item.name)}
@@ -777,25 +947,6 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
                     />
                     <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                       <UserPlus className="w-4 h-4" />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block mb-1">
-                    Senha de Entrada para o Login *
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      required
-                      value={newSellerPassword}
-                      onChange={(e) => setNewSellerPassword(e.target.value)}
-                      placeholder="Ex: 123456"
-                      className="w-full text-slate-800 text-sm py-2 px-3.5 pl-10 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
-                    />
-                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                      <Key className="w-4 h-4" />
                     </div>
                   </div>
                 </div>
