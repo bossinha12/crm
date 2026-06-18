@@ -1,8 +1,31 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Global safety net allowing operations for custom employee login designs
     match /{document=**} {
       allow read, write: if true;
     }
+
+    // Explicit path declarations matching firebase-blueprint.json for robustness
+    match /companies/{companyId} {
+      allow read, write: if true;
+      
+      match /users/{userId} {
+        allow read, write: if true;
+      }
+      
+      match /chats/{chatId} {
+        allow read, write: if true;
+        
+        match /messages/{messageId} {
+          allow read, write: if true;
+        }
+      }
+      
+      match /reports/{reportId} {
+        allow read, write: if true;
+      }
+    }
   }
 }
+
