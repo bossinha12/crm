@@ -275,11 +275,14 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
 
       const idList = Array.from(uniqueChatIds);
 
+      // Optimistic layout wipe
+      setChats([]);
+      setMirroredChatId(null);
+      setMirroredMessages([]);
+
       if (idList.length === 0) {
-        // Force state cleanup anyway
-        setChats([]);
-        setMirroredChatId(null);
-        setMirroredMessages([]);
+        // Wipe potential customer active session stored on browsers
+        localStorage.removeItem('atendepro_client_chat_id');
         alert('Não há conversas ou históricos registrados para apagar.');
         setIsClearing(false);
         return;
@@ -287,8 +290,15 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
 
       // 3. Prepare and execute all deletion processes
       const deletePromises = idList.map(async (chatID) => {
+        // Delete the chat document itself FIRST to clear real-time list immediately
         try {
-          // Fetch and delete all messages in this chat's messages subcollection
+          await deleteDoc(doc(db, 'companies', companyId, 'chats', chatID));
+        } catch (e) {
+          console.warn(`Erro ao excluir chat doc ${chatID}:`, e);
+        }
+
+        try {
+          // Fetch and delete all messages in this chat's messages subcollection second
           const messagesRef = collection(db, 'companies', companyId, 'chats', chatID, 'messages');
           const msgSnapshot = await getDocs(messagesRef);
           const msgDeletes = msgSnapshot.docs.map((msgDoc) => 
@@ -298,24 +308,12 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
         } catch (e) {
           console.warn(`Erro ao excluir sub-mensagens do chat ${chatID}:`, e);
         }
-        
-        try {
-          // Delete the chat document itself
-          await deleteDoc(doc(db, 'companies', companyId, 'chats', chatID));
-        } catch (e) {
-          console.warn(`Erro ao excluir chat doc ${chatID}:`, e);
-        }
       });
 
       await Promise.all(deletePromises);
 
       // 4. Wipe potential customer active session stored on browsers
       localStorage.removeItem('atendepro_client_chat_id');
-
-      // 5. Force update the local React state immediately for snappy rendering
-      setChats([]);
-      setMirroredChatId(null);
-      setMirroredMessages([]);
 
       alert('Todos os dados de atendimentos e históricos de conversas foram excluídos com sucesso do banco de dados!');
     } catch (err) {
@@ -330,23 +328,31 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
     if (!confirm('Deseja realmente apagar esta conversa do banco de dados de forma definitiva?')) return;
     try {
       setIsClearing(true);
-      // Fetch and delete all messages first
-      const msgsRef = collection(db, 'companies', companyId, 'chats', chatIdToDelete, 'messages');
-      const snap = await getDocs(msgsRef);
-      const deletes = snap.docs.map(m => deleteDoc(doc(db, 'companies', companyId, 'chats', chatIdToDelete, 'messages', m.id)));
-      await Promise.all(deletes);
-
-      // Delete the chat itself
-      await deleteDoc(doc(db, 'companies', companyId, 'chats', chatIdToDelete));
       
+      // Optimistic update
+      setChats(prev => prev.filter(c => c.id !== chatIdToDelete));
       if (mirroredChatId === chatIdToDelete) {
         setMirroredChatId(null);
         setMirroredMessages([]);
       }
+
+      // Delete the chat document itself FIRST to ensure it vanishes permanently database-side
+      await deleteDoc(doc(db, 'companies', companyId, 'chats', chatIdToDelete));
+
+      // Fetch and delete all messages second (under error-shield, so it never blocks chat removal)
+      try {
+        const msgsRef = collection(db, 'companies', companyId, 'chats', chatIdToDelete, 'messages');
+        const snap = await getDocs(msgsRef);
+        const deletes = snap.docs.map(m => deleteDoc(doc(db, 'companies', companyId, 'chats', chatIdToDelete, 'messages', m.id)));
+        await Promise.all(deletes);
+      } catch (errMsg) {
+        console.warn('Erro ao limpar sub-mensagens do chat excluído:', errMsg);
+      }
+
       alert('Atendimento apagado com sucesso!');
     } catch (err) {
       console.error('Erro ao excluir atendimento individual:', err);
-      alert('Ocorreu um erro ao tentar excluir o atendimento.');
+      alert('Ocorreu um erro ao tentar excluir o atendimento de forma definitiva no Firestore.');
     } finally {
       setIsClearing(false);
     }
@@ -362,11 +368,26 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
 
     try {
       setIsClearing(true);
+
+      // Optimistic update
+      setChats(prev => prev.filter(c => c.status !== ChatStatus.CLOSED));
+      if (mirroredChatId && closed.some(c => c.id === mirroredChatId)) {
+        setMirroredChatId(null);
+        setMirroredMessages([]);
+      }
+
       const deletes = closed.map(async (c) => {
-        const msgsRef = collection(db, 'companies', companyId, 'chats', c.id, 'messages');
-        const snap = await getDocs(msgsRef);
-        await Promise.all(snap.docs.map(d => deleteDoc(doc(db, 'companies', companyId, 'chats', c.id, 'messages', d.id))));
-        await deleteDoc(doc(db, 'companies', companyId, 'chats', c.id));
+        try {
+          // Delete main doc first to clear real-time feeds immediately
+          await deleteDoc(doc(db, 'companies', companyId, 'chats', c.id));
+          
+          // Delete messages subcollection
+          const msgsRef = collection(db, 'companies', companyId, 'chats', c.id, 'messages');
+          const snap = await getDocs(msgsRef);
+          await Promise.all(snap.docs.map(d => deleteDoc(doc(db, 'companies', companyId, 'chats', c.id, 'messages', d.id))));
+        } catch (e) {
+          console.warn(`Erro ao excluir chat concluído ${c.id}:`, e);
+        }
       });
       await Promise.all(deletes);
       alert('Seu painel foi limpo! Todos os atendimentos concluídos foram removidos do histórico.');
@@ -395,11 +416,27 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
 
     try {
       setIsClearing(true);
+
+      const idsToRemove = new Set(oldAndClosedChats.map(c => c.id));
+      // Optimistic update
+      setChats(prev => prev.filter(c => !idsToRemove.has(c.id)));
+      if (mirroredChatId && idsToRemove.has(mirroredChatId)) {
+        setMirroredChatId(null);
+        setMirroredMessages([]);
+      }
+
       const deletes = oldAndClosedChats.map(async (c) => {
-        const msgsRef = collection(db, 'companies', companyId, 'chats', c.id, 'messages');
-        const snap = await getDocs(msgsRef);
-        await Promise.all(snap.docs.map(d => deleteDoc(doc(db, 'companies', companyId, 'chats', c.id, 'messages', d.id))));
-        await deleteDoc(doc(db, 'companies', companyId, 'chats', c.id));
+        try {
+          // Delete main doc first to clear real-time lists immediately
+          await deleteDoc(doc(db, 'companies', companyId, 'chats', c.id));
+          
+          // Delete messages subcollection
+          const msgsRef = collection(db, 'companies', companyId, 'chats', c.id, 'messages');
+          const snap = await getDocs(msgsRef);
+          await Promise.all(snap.docs.map(d => deleteDoc(doc(db, 'companies', companyId, 'chats', c.id, 'messages', d.id))));
+        } catch (e) {
+          console.warn(`Erro no expurgo de chat antigo ${c.id}:`, e);
+        }
       });
       await Promise.all(deletes);
       alert(`Limpeza concluída! ${count} registros antigos foram apagados com sucesso.`);
