@@ -392,3 +392,5 @@ export default function App() {
     </main>
   );
 }
+
+// Pequeno ajuste para forçar o rastreador de modificações do AI Studio (GitHub Sync)
