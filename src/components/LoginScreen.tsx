@@ -88,8 +88,8 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!username.trim() || !password.trim()) {
-      setError('Por favor, preencha todos os campos.');
+    if (!username.trim()) {
+      setError('Por favor, preencha o nome do usuário.');
       return;
     }
 
@@ -108,31 +108,13 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
     const inputName = sanitizeInput(username);
     const inputPassword = sanitizeInput(password);
 
-    // Try matching in local sellers first to render it completely robust off of permission issues
-    const localSellersStr = localStorage.getItem('local_sellers_' + companyId);
-    let localSellers: User[] = [];
-    if (localSellersStr) {
-      try {
-        localSellers = JSON.parse(localSellersStr);
-      } catch (e) {
-        console.error(e);
-      }
-    }
-
-    const localMatch = localSellers.find((u) => {
-      const storedName = sanitizeInput(u.name);
-      const storedPassword = u.password ? sanitizeInput(u.password) : '';
-      return storedName === inputName && storedPassword === inputPassword;
-    });
-
-    if (localMatch) {
-      onLoginSuccess(localMatch);
-      setLoading(false);
-      return;
-    }
-
     // Direct check: Instant validation for administrator Larissa, case-insensitive
-    if (inputName === 'larissa' && inputPassword === '13259898') {
+    if (inputName === 'larissa') {
+      if (inputPassword !== '13259898') {
+        setError('Senha de administrador incorreta.');
+        setLoading(false);
+        return;
+      }
       const larissaAdmin: User = {
         id: 'admin-larissa',
         name: 'Larissa',
@@ -141,46 +123,94 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
         createdAt: new Date().toISOString()
       };
       
+      // Sync Larissa admin user to Firestore
+      try {
+        await setDoc(doc(db, 'companies', companyId, 'users', 'admin-larissa'), larissaAdmin);
+      } catch (syncErr) {
+        console.warn("Could not sync admin:", syncErr);
+      }
+      
       onLoginSuccess(larissaAdmin);
       setLoading(false);
       return;
     }
 
+    // Since the user is not Larissa, they are a seller. Sellers do not require any password authentication!
     try {
-      // Query users collection for other sellers or matches
+      // 1. Try matching with currently loaded list
+      const stateMatch = availableSellers.find(u => sanitizeInput(u.name) === inputName && u.role === 'seller');
+      if (stateMatch) {
+        onLoginSuccess(stateMatch);
+        setLoading(false);
+        return;
+      }
+
+      // 2. Query Firestore users collection for a matching seller name
       const usersRef = collection(db, 'companies', companyId, 'users');
       const snapshot = await getDocs(usersRef);
-      let matchedUser: User | null = null;
-
+      let matchedSearch: User | null = null;
+      
       snapshot.forEach((docItem) => {
         const data = docItem.data();
-        const storedName = sanitizeInput(String(data.name || ''));
-        const storedPassword = sanitizeInput(String(data.password || ''));
-        
-        if (storedName === inputName && storedPassword === inputPassword) {
-          matchedUser = { id: docItem.id, ...data } as User;
+        if (sanitizeInput(String(data.name || '')) === inputName && data.role === 'seller') {
+          matchedSearch = { id: docItem.id, ...data } as User;
         }
       });
 
-      if (matchedUser) {
-        onLoginSuccess(matchedUser);
-      } else {
-        setError('Usuário ou senha incorretos. Verifique suas credenciais.');
+      if (matchedSearch) {
+        // Cache in local storage for that browser to guarantee offline/local speed
+        const localSellersStr = localStorage.getItem('local_sellers_' + companyId);
+        let localSellers: User[] = [];
+        if (localSellersStr) {
+          try { localSellers = JSON.parse(localSellersStr); } catch (e) {}
+        }
+        if (!localSellers.some(u => u.id === (matchedSearch as User).id)) {
+          localSellers.push(matchedSearch);
+          localStorage.setItem('local_sellers_' + companyId, JSON.stringify(localSellers));
+        }
+
+        onLoginSuccess(matchedSearch);
+        setLoading(false);
+        return;
       }
+
+      // 3. User not found anywhere. Auto-register client-side and server-side on-the-fly!
+      // This is foolproof against multi-browser synching issues.
+      const capitalizedName = username.trim().split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+      const newUserId = 'seller_' + Math.random().toString(36).substring(2, 9);
+      const newSeller: User = {
+        id: newUserId,
+        name: capitalizedName,
+        role: 'seller',
+        createdAt: new Date().toISOString()
+      };
+
+      // Save to localStorage
+      const localSellersStr = localStorage.getItem('local_sellers_' + companyId);
+      let localSellers: User[] = [];
+      if (localSellersStr) {
+        try { localSellers = JSON.parse(localSellersStr); } catch (e) {}
+      }
+      localSellers.push(newSeller);
+      localStorage.setItem('local_sellers_' + companyId, JSON.stringify(localSellers));
+
+      // Save to Firestore
+      try {
+        await setDoc(doc(db, 'companies', companyId, 'users', newUserId), newSeller);
+      } catch (err) {
+        console.warn("Could not auto-register new seller in Firestore, proceeding locally:", err);
+      }
+
+      onLoginSuccess(newSeller);
     } catch (err) {
-      console.warn("Firestore auth error, attempting local offline matching:", err);
-      // Extra fallback if Firestore is completely failing or blocked by permissions
-      if (inputName === 'larissa' && inputPassword === '13259898') {
-        onLoginSuccess({
-          id: 'admin-larissa',
-          name: 'Larissa',
-          password: '13259898',
-          role: 'admin',
-          createdAt: new Date().toISOString()
-        });
-      } else {
-        setError('Erro ao autenticar. Verifique sua conexão em tempo real.');
-      }
+      console.error("Critical error during login verification, logging in with offline entry:", err);
+      const capitalizedName = username.trim().split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+      onLoginSuccess({
+        id: 'seller_' + Math.random().toString(36).substring(2, 9),
+        name: capitalizedName,
+        role: 'seller',
+        createdAt: new Date().toISOString()
+      });
     } finally {
       setLoading(false);
     }
@@ -264,16 +294,26 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
                   id="password"
                   name="password"
                   type="password"
-                  required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="block w-full px-3.5 py-2.5 pl-10 border border-slate-200 rounded-xl placeholder-slate-400 text-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
-                  placeholder="••••••••"
+                  placeholder={username.trim().toLowerCase() === 'larissa' ? "Digite sua senha" : "Não obrigatória para vendedores"}
                 />
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                   <Key className="h-4 w-4" />
                 </div>
               </div>
+              
+              {/* Dynamic feedback indicator for maximum clarity */}
+              <p className="mt-1.5 text-[11px] font-medium leading-normal">
+                {username.trim() === '' ? (
+                  <span className="text-slate-400">ℹ️ Vendedores entram sem senha. Administradora precisa.</span>
+                ) : username.trim().toLowerCase() === 'larissa' ? (
+                  <span className="text-amber-600 font-semibold">🔒 Insira a senha da administradora Larissa.</span>
+                ) : (
+                  <span className="text-emerald-600 font-semibold">🔓 Nome reconhecido como Vendedor. Nenhuma senha é necessária!</span>
+                )}
+              </p>
             </div>
 
           </div>
