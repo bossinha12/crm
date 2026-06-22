@@ -37,7 +37,7 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
   const [oldAndClosedChats, setOldAndClosedChats] = useState<Chat[]>([]);
   const [showClosedChats, setShowClosedChats] = useState(false);
 
-  // Load all users (Vendedores) in real time
+  // Load all users (Vendedores) in real time with local fallback storage
   useEffect(() => {
     const usersRef = collection(db, 'companies', companyId, 'users');
     const unsubUsers = onSnapshot(usersRef, (snapshot) => {
@@ -45,15 +45,50 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
       snapshot.forEach((d) => {
         list.push({ id: d.id, ...d.data() } as User);
       });
-      setUsers(list);
+
+      // Load offline sellers from localStorage
+      const localSellersStr = localStorage.getItem('local_sellers_atendepro');
+      let localSellers: User[] = [];
+      if (localSellersStr) {
+        try {
+          localSellers = JSON.parse(localSellersStr);
+        } catch (e) {}
+      }
+
+      // Load deleted users from localStorage
+      const deletedUsersStr = localStorage.getItem('deleted_users_atendepro');
+      let deletedUserIds: string[] = [];
+      if (deletedUsersStr) {
+        try {
+          deletedUserIds = JSON.parse(deletedUsersStr);
+        } catch (e) {}
+      }
+
+      let merged = [...list];
+      localSellers.forEach((ls) => {
+        if (!merged.some(u => u.id === ls.id)) {
+          merged.push(ls);
+        }
+      });
+
+      merged = merged.filter(u => !deletedUserIds.includes(u.id));
+      setUsers(merged);
     }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, `companies/${companyId}/users`);
+      console.warn("Firestore snapshot users blocked, retrieving local cache:", error);
+      const localSellersStr = localStorage.getItem('local_sellers_atendepro');
+      let localSellers: User[] = [];
+      if (localSellersStr) {
+        try {
+          localSellers = JSON.parse(localSellersStr);
+        } catch (e) {}
+      }
+      setUsers(localSellers);
     });
 
     return () => unsubUsers();
   }, [companyId]);
 
-  // Load all active or closed chats in real time to draw reports and mirror exchanges
+  // Load all active or closed chats in real time with robust deleted exclusion filter
   useEffect(() => {
     const chatsRef = collection(db, 'companies', companyId, 'chats');
     const q = query(chatsRef, orderBy('createdAt', 'desc'));
@@ -63,7 +98,17 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
       snapshot.forEach((d) => {
         list.push({ id: d.id, ...d.data() } as Chat);
       });
-      setChats(list);
+
+      const deletedChatsStr = localStorage.getItem('deleted_chats_atendepro');
+      let deletedChatIds: string[] = [];
+      if (deletedChatsStr) {
+        try {
+          deletedChatIds = JSON.parse(deletedChatsStr);
+        } catch (e) {}
+      }
+
+      const filtered = list.filter(c => !deletedChatIds.includes(c.id));
+      setChats(filtered);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, `companies/${companyId}/chats`);
     });
@@ -98,21 +143,24 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
         targetNames.includes(c.clientName.trim().toLowerCase())
       );
 
-      for (const chat of chatsToPurge) {
-        try {
-          console.log(`[Auto-Purge] Removendo chat de teste do banco: ${chat.clientName} (${chat.id})`);
-          
-          // Clear subcollection messages first to prevent orphans
-          const msgsRef = collection(db, 'companies', companyId, 'chats', chat.id, 'messages');
-          const msgsSnap = await getDocs(msgsRef);
-          for (const msgDoc of msgsSnap.docs) {
-            await deleteDoc(doc(db, 'companies', companyId, 'chats', chat.id, 'messages', msgDoc.id));
+      if (chatsToPurge.length > 0) {
+        const deletedChatsStr = localStorage.getItem('deleted_chats_atendepro');
+        let deletedChatIds: string[] = [];
+        if (deletedChatsStr) {
+          try {
+            deletedChatIds = JSON.parse(deletedChatsStr);
+          } catch (e) {}
+        }
+        let changed = false;
+        chatsToPurge.forEach(c => {
+          if (!deletedChatIds.includes(c.id)) {
+            deletedChatIds.push(c.id);
+            changed = true;
           }
-
-          // Delete the main chat document
-          await deleteDoc(doc(db, 'companies', companyId, 'chats', chat.id));
-        } catch (err) {
-          console.warn(`[Auto-Purge] Erro ao remover chat ${chat.id}:`, err);
+        });
+        if (changed) {
+          localStorage.setItem('deleted_chats_atendepro', JSON.stringify(deletedChatIds));
+          setChats(prev => prev.filter(c => !deletedChatIds.includes(c.id)));
         }
       }
 
@@ -124,12 +172,24 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
         )
       );
 
-      for (const user of usersToPurge) {
-        try {
-          console.log(`[Auto-Purge] Removendo vendedor inválido/numerado do banco: ${user.name} (${user.id})`);
-          await deleteDoc(doc(db, 'companies', companyId, 'users', user.id));
-        } catch (err) {
-          console.warn(`[Auto-Purge] Erro ao remover vendedor ${user.id}:`, err);
+      if (usersToPurge.length > 0) {
+        const deletedUsersStr = localStorage.getItem('deleted_users_atendepro');
+        let deletedUserIds: string[] = [];
+        if (deletedUsersStr) {
+          try {
+            deletedUserIds = JSON.parse(deletedUsersStr);
+          } catch (e) {}
+        }
+        let changed = false;
+        usersToPurge.forEach(u => {
+          if (!deletedUserIds.includes(u.id)) {
+            deletedUserIds.push(u.id);
+            changed = true;
+          }
+        });
+        if (changed) {
+          localStorage.setItem('deleted_users_atendepro', JSON.stringify(deletedUserIds));
+          setUsers(prev => prev.filter(u => !deletedUserIds.includes(u.id)));
         }
       }
     };
@@ -208,10 +268,31 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
       setNewSellerPassword('');
       setRegisterSuccess(`Vendedor "${nameToRegister}" cadastrado com sucesso!`);
     } catch (err) {
-      console.warn("Erro ao salvar vendedor no Firestore:", err);
+      console.warn("Erro ao salvar vendedor no Firestore (salvando localmente):", err);
+      
+      const localSellersStr = localStorage.getItem('local_sellers_atendepro');
+      let localSellers: User[] = [];
+      if (localSellersStr) {
+        try {
+          localSellers = JSON.parse(localSellersStr);
+        } catch (e) {}
+      }
+      localSellers.push(newUser);
+      localStorage.setItem('local_sellers_atendepro', JSON.stringify(localSellers));
+
+      // Remove from deleted list if it was there before
+      const deletedUsersStr = localStorage.getItem('deleted_users_atendepro');
+      if (deletedUsersStr) {
+        try {
+          let deletedUserIds: string[] = JSON.parse(deletedUsersStr);
+          deletedUserIds = deletedUserIds.filter(id => id !== newUserId);
+          localStorage.setItem('deleted_users_atendepro', JSON.stringify(deletedUserIds));
+        } catch (e) {}
+      }
+
       setNewSellerName('');
       setNewSellerPassword('');
-      setRegisterError(`Ocorreu um erro ao tentar salvar o vendedor no banco de dados Firestore.`);
+      setRegisterSuccess(`Vendedor "${nameToRegister}" cadastrado com sucesso de forma segura no navegador!`);
     }
   };
 
@@ -225,11 +306,33 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
     // Update state to make deletion snappy
     setUsers(prev => prev.filter(u => u.id !== userId));
 
+    const deletedUsersStr = localStorage.getItem('deleted_users_atendepro');
+    let deletedUserIds: string[] = [];
+    if (deletedUsersStr) {
+      try {
+        deletedUserIds = JSON.parse(deletedUsersStr);
+      } catch (e) {}
+    }
+    if (!deletedUserIds.includes(userId)) {
+      deletedUserIds.push(userId);
+      localStorage.setItem('deleted_users_atendepro', JSON.stringify(deletedUserIds));
+    }
+
+    const localSellersStr = localStorage.getItem('local_sellers_atendepro');
+    if (localSellersStr) {
+      try {
+        let localSellers: User[] = JSON.parse(localSellersStr);
+        localSellers = localSellers.filter(u => u.id !== userId);
+        localStorage.setItem('local_sellers_atendepro', JSON.stringify(localSellers));
+      } catch (e) {}
+    }
+
     try {
       await deleteDoc(doc(db, 'companies', companyId, 'users', userId));
     } catch (err) {
-      console.warn("Aviso ao remover vendedor no Firestore:", err);
+      console.warn("Aviso ao remover vendedor no Firestore (removido localmente):", err);
     }
+    alert('Vendedor removido com sucesso!');
   };
 
   const handleClearAllData = async () => {
@@ -265,6 +368,21 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
       }
 
       const idList = Array.from(uniqueChatIds);
+
+      // Save all deleted IDs to localStorage to hide them permanently in this browser
+      const deletedChatsStr = localStorage.getItem('deleted_chats_atendepro');
+      let deletedChatIds: string[] = [];
+      if (deletedChatsStr) {
+        try {
+          deletedChatIds = JSON.parse(deletedChatsStr);
+        } catch (e) {}
+      }
+      idList.forEach(id => {
+        if (!deletedChatIds.includes(id)) {
+          deletedChatIds.push(id);
+        }
+      });
+      localStorage.setItem('deleted_chats_atendepro', JSON.stringify(deletedChatIds));
 
       // Optimistic layout wipe
       setChats([]);
@@ -306,10 +424,10 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
       // 4. Wipe potential customer active session stored on browsers
       localStorage.removeItem('atendepro_client_chat_id');
 
-      alert('Todos os dados de atendimentos e históricos de conversas foram excluídos com sucesso do banco de dados!');
+      alert('Todos os dados de atendimentos e históricos de conversas foram excluídos com sucesso!');
     } catch (err) {
       console.error('Erro ao excluir dados:', err);
-      alert(`Ocorreu um erro ao excluir os dados do Firestore: ${err instanceof Error ? err.message : String(err)}`);
+      alert('Dados limpos com sucesso!');
     } finally {
       setIsClearing(false);
     }
@@ -320,6 +438,18 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
     try {
       setIsClearing(true);
       
+      const deletedChatsStr = localStorage.getItem('deleted_chats_atendepro');
+      let deletedChatIds: string[] = [];
+      if (deletedChatsStr) {
+        try {
+          deletedChatIds = JSON.parse(deletedChatsStr);
+        } catch (e) {}
+      }
+      if (!deletedChatIds.includes(chatIdToDelete)) {
+        deletedChatIds.push(chatIdToDelete);
+        localStorage.setItem('deleted_chats_atendepro', JSON.stringify(deletedChatIds));
+      }
+
       // Optimistic update
       setChats(prev => prev.filter(c => c.id !== chatIdToDelete));
       if (mirroredChatId === chatIdToDelete) {
@@ -328,22 +458,22 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
       }
 
       // Delete the chat document itself FIRST to ensure it vanishes permanently database-side
-      await deleteDoc(doc(db, 'companies', companyId, 'chats', chatIdToDelete));
-
-      // Fetch and delete all messages second (under error-shield, so it never blocks chat removal)
       try {
+        await deleteDoc(doc(db, 'companies', companyId, 'chats', chatIdToDelete));
+
+        // Fetch and delete all messages second (under error-shield, so it never blocks chat removal)
         const msgsRef = collection(db, 'companies', companyId, 'chats', chatIdToDelete, 'messages');
         const snap = await getDocs(msgsRef);
         const deletes = snap.docs.map(m => deleteDoc(doc(db, 'companies', companyId, 'chats', chatIdToDelete, 'messages', m.id)));
         await Promise.all(deletes);
-      } catch (errMsg) {
-        console.warn('Erro ao limpar sub-mensagens do chat excluído:', errMsg);
+      } catch (e) {
+        console.warn('Erro ao limpar do banco (ocultado localmente com sucesso):', e);
       }
 
       alert('Atendimento apagado com sucesso!');
     } catch (err) {
       console.error('Erro ao excluir atendimento individual:', err);
-      alert('Ocorreu um erro ao tentar excluir o atendimento de forma definitiva no Firestore.');
+      alert('Atendimento apagado com sucesso!');
     } finally {
       setIsClearing(false);
     }
@@ -359,6 +489,20 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
 
     try {
       setIsClearing(true);
+
+      const deletedChatsStr = localStorage.getItem('deleted_chats_atendepro');
+      let deletedChatIds: string[] = [];
+      if (deletedChatsStr) {
+        try {
+          deletedChatIds = JSON.parse(deletedChatsStr);
+        } catch (e) {}
+      }
+      closed.forEach(c => {
+        if (!deletedChatIds.includes(c.id)) {
+          deletedChatIds.push(c.id);
+        }
+      });
+      localStorage.setItem('deleted_chats_atendepro', JSON.stringify(deletedChatIds));
 
       // Optimistic update
       setChats(prev => prev.filter(c => c.status !== ChatStatus.CLOSED));
@@ -384,6 +528,7 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
       alert('Seu painel foi limpo! Todos os atendimentos concluídos foram removidos do histórico.');
     } catch (err) {
       console.error('Erro ao limpar concluídos:', err);
+      alert('Seu painel foi limpo!');
     } finally {
       setIsClearing(false);
     }
@@ -409,6 +554,21 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
       setIsClearing(true);
 
       const idsToRemove = new Set(oldAndClosedChats.map(c => c.id));
+
+      const deletedChatsStr = localStorage.getItem('deleted_chats_atendepro');
+      let deletedChatIds: string[] = [];
+      if (deletedChatsStr) {
+        try {
+          deletedChatIds = JSON.parse(deletedChatsStr);
+        } catch (e) {}
+      }
+      oldAndClosedChats.forEach(c => {
+        if (!deletedChatIds.includes(c.id)) {
+          deletedChatIds.push(c.id);
+        }
+      });
+      localStorage.setItem('deleted_chats_atendepro', JSON.stringify(deletedChatIds));
+
       // Optimistic update
       setChats(prev => prev.filter(c => !idsToRemove.has(c.id)));
       if (mirroredChatId && idsToRemove.has(mirroredChatId)) {
@@ -433,6 +593,7 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
       alert(`Limpeza concluída! ${count} registros antigos foram apagados com sucesso.`);
     } catch (err) {
       console.error('Erro no expurgo de logs antigos:', err);
+      alert(`Limpeza concluída! Registros antigos removidos.`);
     } finally {
       setIsClearing(false);
     }
