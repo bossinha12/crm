@@ -30,17 +30,6 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
       // Set Larissa in available sellers first to make it immediately available
       setAvailableSellers([larissaUser]);
 
-      // Merge with local sellers!
-      const localSellersStr = localStorage.getItem('local_sellers_' + companyId);
-      let localSellers: User[] = [];
-      if (localSellersStr) {
-        try {
-          localSellers = JSON.parse(localSellersStr);
-        } catch (e) {
-          console.error(e);
-        }
-      }
-
       try {
         const usersRef = collection(db, 'companies', companyId, 'users');
         const snapshot = await getDocs(usersRef);
@@ -57,30 +46,14 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
           console.warn("Could not sync admin to Firestore, proceeding with local fallback:", syncErr);
         }
 
-        // Filter out any duplicates
+        // Filter out duplicates and Larissa
         let filteredList = list.filter(u => u.name.toLowerCase() !== 'larissa' && u.id !== 'admin-larissa');
-        
-        // Add unique local sellers to the options list
-        localSellers.forEach(localU => {
-          const exists = filteredList.some(u => u.id === localU.id || u.name.toLowerCase() === localU.name.toLowerCase());
-          if (!exists) {
-            filteredList.push(localU);
-          }
-        });
 
         filteredList.unshift(larissaUser);
         setAvailableSellers(filteredList);
       } catch (err) {
         console.warn("Aviso ao carregar usuários inicial:", err);
-        // Fallback using local sellers and administrative root Larson on fetch error
-        const backupList = [larissaUser];
-        localSellers.forEach(localU => {
-          const exists = backupList.some(u => u.id === localU.id || u.name.toLowerCase() === localU.name.toLowerCase());
-          if (!exists) {
-            backupList.push(localU);
-          }
-        });
-        setAvailableSellers(backupList);
+        setAvailableSellers([larissaUser]);
       }
     }
     fetchUsers();
@@ -135,7 +108,7 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
       return;
     }
 
-    // Since the user is not Larissa, they are a seller. Sellers do not require any password authentication!
+    // Since the user is not Larissa, they are a seller. Sellers do not require password authentication, but must be registered!
     try {
       // 1. Try matching with currently loaded list
       const stateMatch = availableSellers.find(u => sanitizeInput(u.name) === inputName && u.role === 'seller');
@@ -158,59 +131,16 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
       });
 
       if (matchedSearch) {
-        // Cache in local storage for that browser to guarantee offline/local speed
-        const localSellersStr = localStorage.getItem('local_sellers_' + companyId);
-        let localSellers: User[] = [];
-        if (localSellersStr) {
-          try { localSellers = JSON.parse(localSellersStr); } catch (e) {}
-        }
-        if (!localSellers.some(u => u.id === (matchedSearch as User).id)) {
-          localSellers.push(matchedSearch);
-          localStorage.setItem('local_sellers_' + companyId, JSON.stringify(localSellers));
-        }
-
         onLoginSuccess(matchedSearch);
         setLoading(false);
         return;
       }
 
-      // 3. User not found anywhere. Auto-register client-side and server-side on-the-fly!
-      // This is foolproof against multi-browser synching issues.
-      const capitalizedName = username.trim().split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-      const newUserId = 'seller_' + Math.random().toString(36).substring(2, 9);
-      const newSeller: User = {
-        id: newUserId,
-        name: capitalizedName,
-        role: 'seller',
-        createdAt: new Date().toISOString()
-      };
-
-      // Save to localStorage
-      const localSellersStr = localStorage.getItem('local_sellers_' + companyId);
-      let localSellers: User[] = [];
-      if (localSellersStr) {
-        try { localSellers = JSON.parse(localSellersStr); } catch (e) {}
-      }
-      localSellers.push(newSeller);
-      localStorage.setItem('local_sellers_' + companyId, JSON.stringify(localSellers));
-
-      // Save to Firestore
-      try {
-        await setDoc(doc(db, 'companies', companyId, 'users', newUserId), newSeller);
-      } catch (err) {
-        console.warn("Could not auto-register new seller in Firestore, proceeding locally:", err);
-      }
-
-      onLoginSuccess(newSeller);
+      // If they are not found in Firestore, they cannot log in.
+      setError('Vendedor não encontrado. Aguarde que a administradora Larissa realize o seu cadastro.');
     } catch (err) {
-      console.error("Critical error during login verification, logging in with offline entry:", err);
-      const capitalizedName = username.trim().split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-      onLoginSuccess({
-        id: 'seller_' + Math.random().toString(36).substring(2, 9),
-        name: capitalizedName,
-        role: 'seller',
-        createdAt: new Date().toISOString()
-      });
+      console.error("Critical error during login verification:", err);
+      setError('Erro ao validar seu login. Verifique sua conexão ou tente novamente.');
     } finally {
       setLoading(false);
     }
@@ -222,8 +152,8 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
         
         {/* Branding Title */}
         <div className="text-center">
-          <div className="mx-auto h-12 w-12 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-lg shadow-indigo-100 mb-4 animate-pulse">
-            <Compass className="h-6 w-6" id="brand-compass-icon" />
+          <div className="mx-auto h-24 w-24 rounded-full border border-slate-150 overflow-hidden shadow-md mb-4 bg-white flex items-center justify-center">
+            <img src="https://i.postimg.cc/8CdttXNK/Whats-App-Image-2026-06-10-at-14-30-14.jpg" referrerPolicy="no-referrer" alt="Larissa Móveis Logo" className="w-full h-full object-cover" />
           </div>
           <h2 className="text-3xl font-extrabold text-slate-800 tracking-tight">Larissa Móveis</h2>
           <p className="mt-2 text-sm text-slate-500">

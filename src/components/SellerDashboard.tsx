@@ -73,6 +73,30 @@ export default function SellerDashboard({ companyId, sellerUser, onLogout }: Sel
     };
   }, [companyId]);
 
+  // Hook to log out if the seller's user document is deleted from Firestore
+  useEffect(() => {
+    if (sellerUser.id === 'admin-larissa') return;
+    const userDocRef = doc(db, 'companies', companyId, 'users', sellerUser.id);
+    const unsubUser = onSnapshot(userDocRef, (snapshot) => {
+      if (!snapshot.exists()) {
+        alert("Atenção: Seu perfil de vendedor foi removido pelo administrador. Você foi desconectado.");
+        onLogout();
+      }
+    });
+    return () => unsubUser();
+  }, [sellerUser.id, companyId, onLogout]);
+
+  // Hook to automatically unselect the active chat if it gets deleted from resources
+  useEffect(() => {
+    if (selectedChatId && chats.length > 0) {
+      const exists = chats.some(c => c.id === selectedChatId);
+      if (!exists) {
+        setSelectedChatId(null);
+        setSelectedChatMessages([]);
+      }
+    }
+  }, [chats, selectedChatId]);
+
   // 2. Active Chat Messages list watcher
   useEffect(() => {
     if (!selectedChatId) {
@@ -220,12 +244,17 @@ export default function SellerDashboard({ companyId, sellerUser, onLogout }: Sel
       
       {/* Top Banner Context Card */}
       <div className="bg-slate-900 border border-slate-800 text-white rounded-2xl p-5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 relative overflow-hidden shrink-0 shadow-lg shadow-slate-900/10">
-        <div>
-          <span className="text-indigo-400 font-extrabold text-[10px] tracking-wider uppercase bg-indigo-950/50 border border-indigo-800/10 px-2.5 py-0.5 rounded-full inline-block mb-1.5">
-            CONEXÃO REAL-TIME ATIVA
-          </span>
-          <h2 className="text-xl font-bold tracking-tight">Atendimentos de {sellerUser.name}</h2>
-          <p className="text-xs text-slate-400 mt-0.5">Vendedor(a) Autorizado da Loja • CRM</p>
+        <div className="flex items-center gap-3.5 mr-auto">
+          <div className="w-12 h-12 rounded-full border border-slate-700 overflow-hidden shrink-0 bg-white shadow-inner flex items-center justify-center">
+            <img src="https://i.postimg.cc/8CdttXNK/Whats-App-Image-2026-06-10-at-14-30-14.jpg" referrerPolicy="no-referrer" alt="Larissa Móveis Logo" className="w-full h-full object-cover" />
+          </div>
+          <div>
+            <span className="text-indigo-400 font-extrabold text-[10px] tracking-wider uppercase bg-indigo-950/50 border border-indigo-800/10 px-2.5 py-0.5 rounded-full inline-block mb-1">
+              CONEXÃO REAL-TIME ATIVA
+            </span>
+            <h2 className="text-xl font-bold tracking-tight">Atendimentos de {sellerUser.name}</h2>
+            <p className="text-xs text-slate-400 mt-0.5">Vendedor(a) Autorizado da Loja • CRM</p>
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
