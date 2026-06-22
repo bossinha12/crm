@@ -9,6 +9,14 @@ interface LoginScreenProps {
   onLoginSuccess: (user: User) => void;
 }
 
+const sanitizeInput = (text: string) => {
+  return text
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, ""); // removes accents and trim
+};
+
 export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenProps) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -54,6 +62,9 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
           list.push({ id: d.id, ...d.data() } as User);
         });
 
+        // Cache firestore list for offline-resilience
+        localStorage.setItem('cached_firestore_sellers_atendepro', JSON.stringify(list));
+
         // Silently try to synchronize Larissa to Firestore
         try {
           await setDoc(doc(db, 'companies', companyId, 'users', 'admin-larissa'), larissaUser);
@@ -80,7 +91,23 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
         setAvailableSellers(merged);
       } catch (err) {
         console.warn("Aviso ao carregar usuários inicial, usando locais:", err);
-        let merged = [...localSellers];
+        
+        // Load cached firestore list
+        const cachedFirestoreSellersStr = localStorage.getItem('cached_firestore_sellers_atendepro');
+        let cachedList: User[] = [];
+        if (cachedFirestoreSellersStr) {
+          try {
+            cachedList = JSON.parse(cachedFirestoreSellersStr);
+          } catch (e) {}
+        }
+
+        let merged = [...cachedList];
+        localSellers.forEach((ls) => {
+          if (!merged.some(u => u.id === ls.id)) {
+            merged.push(ls);
+          }
+        });
+
         merged = merged.filter(u => 
           u.name.toLowerCase() !== 'larissa' && 
           u.id !== 'admin-larissa' &&
@@ -102,15 +129,6 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
 
     setLoading(true);
     setError(null);
-
-    // Sanitize and normalize inputs to make sure characters and case do not block login
-    const sanitizeInput = (text: string) => {
-      return text
-        .trim()
-        .toLowerCase()
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, ""); // removes accents and trim
-    };
 
     const inputName = sanitizeInput(username);
     const inputPassword = sanitizeInput(password);
@@ -305,9 +323,18 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
                   <span className="text-slate-400">ℹ️ Vendedores entram sem senha. Administradora precisa.</span>
                 ) : username.trim().toLowerCase() === 'larissa' ? (
                   <span className="text-amber-600 font-semibold">🔒 Insira a senha da administradora Larissa.</span>
-                ) : (
-                  <span className="text-emerald-600 font-semibold">🔓 Nome reconhecido como Vendedor. Nenhuma senha é necessária!</span>
-                )}
+                ) : (() => {
+                  const found = availableSellers.find(s => s.role === 'seller' && sanitizeInput(s.name) === sanitizeInput(username));
+                  if (found) {
+                    return (
+                      <span className="text-emerald-600 font-semibold">🔓 Vendedor "{found.name}" reconhecido e ativo. Nenhuma senha é necessária!</span>
+                    );
+                  } else {
+                    return (
+                      <span className="text-rose-600 font-semibold">⚠️ Vendedor não cadastrado. Se você já tem cadastro, verifique a grafia do nome ou peça para a Larissa cadastrar novamente.</span>
+                    );
+                  }
+                })()}
               </p>
             </div>
 

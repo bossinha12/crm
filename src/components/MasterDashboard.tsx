@@ -292,7 +292,7 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
 
       setNewSellerName('');
       setNewSellerPassword('');
-      setRegisterSuccess(`Vendedor "${nameToRegister}" cadastrado com sucesso de forma segura no navegador!`);
+      setRegisterError(`⚠️ Salvo apenas localmente: O vendedor "${nameToRegister}" foi cadastrado no seu navegador, mas NÃO foi possível sincronizar com o servidor (banco de dados). Ele só conseguirá entrar se usar este mesmo aparelho, até que a conexão com o servidor seja restabelecida.`);
     }
   };
 
