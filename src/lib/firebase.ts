@@ -1,17 +1,13 @@
 import { initializeApp, getApp, getApps } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { initializeFirestore, doc, getDocFromServer } from 'firebase/firestore';
+import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 // Support lazy reuse or new initializations
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
-// CRITICAL: Must use firestoreDatabaseId for custom provisioned databases under enterprise, forcing long-polling to bypass WebSocket restrictions in nested browsers/iframes.
-// GitHub Sync Trigger: Added robust offline compatibility check to ensure multi-browser connections work seamlessly.
-export const db = firebaseConfig.firestoreDatabaseId
-  ? initializeFirestore(app, { experimentalForceLongPolling: true }, firebaseConfig.firestoreDatabaseId)
-  : initializeFirestore(app, { experimentalForceLongPolling: true });
-
+// CRITICAL: Must use firestoreDatabaseId for custom provisioned databases under enterprise
+export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
 
 // Operational Types for diagnostics

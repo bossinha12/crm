@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { db, auth, testFirestoreConnection } from './lib/firebase';
-import { signInAnonymously } from 'firebase/auth';
+import { db, testFirestoreConnection } from './lib/firebase';
 import { User, Company } from './types';
 import LoginScreen from './components/LoginScreen';
 import ClientWidget from './components/ClientWidget';
@@ -58,14 +57,6 @@ export default function App() {
   useEffect(() => {
     async function bootstrapCompany() {
       try {
-        // Authenticate anonymously so the user has valid session credentials for the database
-        try {
-          await signInAnonymously(auth);
-          console.log("Firebase Auth: Autenticado anonimamente com sucesso.");
-        } catch (authErr) {
-          console.warn("Firebase Auth: Login anônimo opcional falhou ou não habilitado, prosseguindo:", authErr);
-        }
-
         await testFirestoreConnection();
         const companyDocRef = doc(db, 'companies', companyId);
         const snapshot = await getDoc(companyDocRef);

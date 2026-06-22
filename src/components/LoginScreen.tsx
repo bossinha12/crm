@@ -9,14 +9,6 @@ interface LoginScreenProps {
   onLoginSuccess: (user: User) => void;
 }
 
-const sanitizeInput = (text: string) => {
-  return text
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, ""); // removes accents and trim
-};
-
 export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenProps) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -35,6 +27,20 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
         createdAt: new Date().toISOString()
       };
 
+      // Set Larissa in available sellers first to make it immediately available
+      setAvailableSellers([larissaUser]);
+
+      // Merge with local sellers!
+      const localSellersStr = localStorage.getItem('local_sellers_' + companyId);
+      let localSellers: User[] = [];
+      if (localSellersStr) {
+        try {
+          localSellers = JSON.parse(localSellersStr);
+        } catch (e) {
+          console.error(e);
+        }
+      }
+
       try {
         const usersRef = collection(db, 'companies', companyId, 'users');
         const snapshot = await getDocs(usersRef);
@@ -48,20 +54,33 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
         try {
           await setDoc(doc(db, 'companies', companyId, 'users', 'admin-larissa'), larissaUser);
         } catch (syncErr) {
-          console.warn("Could not sync admin to Firestore:", syncErr);
+          console.warn("Could not sync admin to Firestore, proceeding with local fallback:", syncErr);
         }
 
-        // Filter out admin-larissa copies and any 'larissa' duplicate
-        let merged = list.filter(u => 
-          u.name.toLowerCase() !== 'larissa' && 
-          u.id !== 'admin-larissa'
-        );
+        // Filter out any duplicates
+        let filteredList = list.filter(u => u.name.toLowerCase() !== 'larissa' && u.id !== 'admin-larissa');
+        
+        // Add unique local sellers to the options list
+        localSellers.forEach(localU => {
+          const exists = filteredList.some(u => u.id === localU.id || u.name.toLowerCase() === localU.name.toLowerCase());
+          if (!exists) {
+            filteredList.push(localU);
+          }
+        });
 
-        merged.unshift(larissaUser);
-        setAvailableSellers(merged);
+        filteredList.unshift(larissaUser);
+        setAvailableSellers(filteredList);
       } catch (err) {
         console.warn("Aviso ao carregar usuários inicial:", err);
-        setAvailableSellers([larissaUser]);
+        // Fallback using local sellers and administrative root Larson on fetch error
+        const backupList = [larissaUser];
+        localSellers.forEach(localU => {
+          const exists = backupList.some(u => u.id === localU.id || u.name.toLowerCase() === localU.name.toLowerCase());
+          if (!exists) {
+            backupList.push(localU);
+          }
+        });
+        setAvailableSellers(backupList);
       }
     }
     fetchUsers();
@@ -69,24 +88,51 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!username.trim()) {
-      setError('Por favor, preencha o nome do usuário.');
+    if (!username.trim() || !password.trim()) {
+      setError('Por favor, preencha todos os campos.');
       return;
     }
 
     setLoading(true);
     setError(null);
 
+    // Sanitize and normalize inputs to make sure characters and case do not block login
+    const sanitizeInput = (text: string) => {
+      return text
+        .trim()
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, ""); // removes accents and trim
+    };
+
     const inputName = sanitizeInput(username);
     const inputPassword = sanitizeInput(password);
 
-    // Direct check: Instant validation for administrator Larissa, case-insensitive
-    if (inputName === 'larissa') {
-      if (inputPassword !== '13259898') {
-        setError('Senha de administrador incorreta.');
-        setLoading(false);
-        return;
+    // Try matching in local sellers first to render it completely robust off of permission issues
+    const localSellersStr = localStorage.getItem('local_sellers_' + companyId);
+    let localSellers: User[] = [];
+    if (localSellersStr) {
+      try {
+        localSellers = JSON.parse(localSellersStr);
+      } catch (e) {
+        console.error(e);
       }
+    }
+
+    const localMatch = localSellers.find((u) => {
+      const storedName = sanitizeInput(u.name);
+      const storedPassword = u.password ? sanitizeInput(u.password) : '';
+      return storedName === inputName && storedPassword === inputPassword;
+    });
+
+    if (localMatch) {
+      onLoginSuccess(localMatch);
+      setLoading(false);
+      return;
+    }
+
+    // Direct check: Instant validation for administrator Larissa, case-insensitive
+    if (inputName === 'larissa' && inputPassword === '13259898') {
       const larissaAdmin: User = {
         id: 'admin-larissa',
         name: 'Larissa',
@@ -95,51 +141,46 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
         createdAt: new Date().toISOString()
       };
       
-      // Sync Larissa admin user to Firestore
-      try {
-        await setDoc(doc(db, 'companies', companyId, 'users', 'admin-larissa'), larissaAdmin);
-      } catch (syncErr) {
-        console.warn("Could not sync admin:", syncErr);
-      }
-      
       onLoginSuccess(larissaAdmin);
       setLoading(false);
       return;
     }
 
-    // Since the user is not Larissa, they are a seller. Sellers do not require password authentication, but must be registered!
     try {
-      // 1. Try matching with currently loaded list from Firestore
-      const stateMatch = availableSellers.find(u => sanitizeInput(u.name) === inputName && u.role === 'seller');
-      if (stateMatch) {
-        onLoginSuccess(stateMatch);
-        setLoading(false);
-        return;
-      }
-
-      // 2. Direct check Firestore users collection for a matching seller name
+      // Query users collection for other sellers or matches
       const usersRef = collection(db, 'companies', companyId, 'users');
       const snapshot = await getDocs(usersRef);
-      let matchedSearch: User | null = null;
-      
+      let matchedUser: User | null = null;
+
       snapshot.forEach((docItem) => {
         const data = docItem.data();
-        if (sanitizeInput(String(data.name || '')) === inputName && data.role === 'seller') {
-          matchedSearch = { id: docItem.id, ...data } as User;
+        const storedName = sanitizeInput(String(data.name || ''));
+        const storedPassword = sanitizeInput(String(data.password || ''));
+        
+        if (storedName === inputName && storedPassword === inputPassword) {
+          matchedUser = { id: docItem.id, ...data } as User;
         }
       });
 
-      if (matchedSearch) {
-        onLoginSuccess(matchedSearch);
-        setLoading(false);
-        return;
+      if (matchedUser) {
+        onLoginSuccess(matchedUser);
+      } else {
+        setError('Usuário ou senha incorretos. Verifique suas credenciais.');
       }
-
-      // If they are not found in Firestore, they cannot log in.
-      setError('Vendedor não cadastrado. Se você já tem cadastro, verifique a grafia do nome ou peça para a Larissa cadastrar novamente.');
     } catch (err) {
-      console.error("Critical error during login verification:", err);
-      setError('Erro de conexão ao verificar cadastro. Por favor, tente novamente.');
+      console.warn("Firestore auth error, attempting local offline matching:", err);
+      // Extra fallback if Firestore is completely failing or blocked by permissions
+      if (inputName === 'larissa' && inputPassword === '13259898') {
+        onLoginSuccess({
+          id: 'admin-larissa',
+          name: 'Larissa',
+          password: '13259898',
+          role: 'admin',
+          createdAt: new Date().toISOString()
+        });
+      } else {
+        setError('Erro ao autenticar. Verifique sua conexão em tempo real.');
+      }
     } finally {
       setLoading(false);
     }
@@ -151,8 +192,8 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
         
         {/* Branding Title */}
         <div className="text-center">
-          <div className="mx-auto h-24 w-24 rounded-full border border-slate-150 overflow-hidden shadow-md mb-4 bg-white flex items-center justify-center">
-            <img src="https://i.postimg.cc/8CdttXNK/Whats-App-Image-2026-06-10-at-14-30-14.jpg" referrerPolicy="no-referrer" alt="Larissa Móveis Logo" className="w-full h-full object-cover" />
+          <div className="mx-auto h-12 w-12 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-lg shadow-indigo-100 mb-4 animate-pulse">
+            <Compass className="h-6 w-6" id="brand-compass-icon" />
           </div>
           <h2 className="text-3xl font-extrabold text-slate-800 tracking-tight">Larissa Móveis</h2>
           <p className="mt-2 text-sm text-slate-500">
@@ -223,35 +264,16 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
                   id="password"
                   name="password"
                   type="password"
+                  required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="block w-full px-3.5 py-2.5 pl-10 border border-slate-200 rounded-xl placeholder-slate-400 text-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
-                  placeholder={username.trim().toLowerCase() === 'larissa' ? "Digite sua senha" : "Não obrigatória para vendedores"}
+                  placeholder="••••••••"
                 />
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                   <Key className="h-4 w-4" />
                 </div>
               </div>
-              
-              {/* Dynamic feedback indicator for maximum clarity */}
-              <p className="mt-1.5 text-[11px] font-medium leading-normal">
-                {username.trim() === '' ? (
-                  <span className="text-slate-400">ℹ️ Vendedores entram sem senha. Administradora precisa.</span>
-                ) : username.trim().toLowerCase() === 'larissa' ? (
-                  <span className="text-amber-600 font-semibold">🔒 Insira a senha da administradora Larissa.</span>
-                ) : (() => {
-                  const found = availableSellers.find(s => s.role === 'seller' && sanitizeInput(s.name) === sanitizeInput(username));
-                  if (found) {
-                    return (
-                      <span className="text-emerald-600 font-semibold">🔓 Vendedor "{found.name}" reconhecido e ativo. Nenhuma senha é necessária!</span>
-                    );
-                  } else {
-                    return (
-                      <span className="text-rose-600 font-semibold">⚠️ Vendedor não cadastrado. Se você já tem cadastro, verifique a grafia do nome ou peça para a Larissa cadastrar novamente.</span>
-                    );
-                  }
-                })()}
-              </p>
             </div>
 
           </div>
