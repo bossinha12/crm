@@ -35,6 +35,7 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
   const [activeTab, setActiveTab] = useState<'analytics' | 'sellers' | 'live-feeds'>('analytics');
   const [isClearing, setIsClearing] = useState(false);
   const [oldAndClosedChats, setOldAndClosedChats] = useState<Chat[]>([]);
+  const [showClosedChats, setShowClosedChats] = useState(false);
 
   // Load all users (Vendedores) in real time
   useEffect(() => {
@@ -85,6 +86,56 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
     });
     setOldAndClosedChats(candidates);
   }, [chats]);
+
+  // Automated background database cleanup hook for test chats and numbered/invalid sellers
+  useEffect(() => {
+    if (chats.length === 0 && users.length === 0) return;
+
+    const performBackgroundPurge = async () => {
+      // 1. Identify specific test / unwanted chats
+      const targetNames = ['marco', 'rosa', 'jose'];
+      const chatsToPurge = chats.filter(c => 
+        targetNames.includes(c.clientName.trim().toLowerCase())
+      );
+
+      for (const chat of chatsToPurge) {
+        try {
+          console.log(`[Auto-Purge] Removendo chat de teste do banco: ${chat.clientName} (${chat.id})`);
+          
+          // Clear subcollection messages first to prevent orphans
+          const msgsRef = collection(db, 'companies', companyId, 'chats', chat.id, 'messages');
+          const msgsSnap = await getDocs(msgsRef);
+          for (const msgDoc of msgsSnap.docs) {
+            await deleteDoc(doc(db, 'companies', companyId, 'chats', chat.id, 'messages', msgDoc.id));
+          }
+
+          // Delete the main chat document
+          await deleteDoc(doc(db, 'companies', companyId, 'chats', chat.id));
+        } catch (err) {
+          console.warn(`[Auto-Purge] Erro ao remover chat ${chat.id}:`, err);
+        }
+      }
+
+      // 2. Identify sellers that have numbers in their names (e.g., "vendedor 1") or are default test values
+      const usersToPurge = users.filter(u => 
+        u.role === 'seller' && (
+          /\d/.test(u.name) || 
+          ['vendedor', 'vendedor 1', 'vendedor 2', 'vendedor 3', 'vendedor1', 'vendedor2', 'vendedor3'].includes(u.name.trim().toLowerCase())
+        )
+      );
+
+      for (const user of usersToPurge) {
+        try {
+          console.log(`[Auto-Purge] Removendo vendedor inválido/numerado do banco: ${user.name} (${user.id})`);
+          await deleteDoc(doc(db, 'companies', companyId, 'users', user.id));
+        } catch (err) {
+          console.warn(`[Auto-Purge] Erro ao remover vendedor ${user.id}:`, err);
+        }
+      }
+    };
+
+    performBackgroundPurge();
+  }, [chats, users, companyId]);
 
   // Mirror specified active customer chat thread in real-time
   useEffect(() => {
@@ -756,7 +807,18 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
             {/* Conversations list column on left (Lg: col-span-5) */}
             <div className="lg:col-span-5 bg-white border border-slate-100 rounded-2xl shadow-xl p-4 flex flex-col h-[400px]">
               <div className="flex justify-between items-center mb-3">
-                <h3 className="text-slate-800 font-extrabold text-sm tracking-tight">CONVERSAS ATIVAS</h3>
+                <div className="flex flex-col gap-0.5">
+                  <h3 className="text-slate-800 font-extrabold text-xs tracking-tight uppercase">CONVERSAS ATIVAS</h3>
+                  <label className="flex items-center gap-1.5 cursor-pointer text-[10px] font-bold text-slate-500 bg-slate-50 hover:bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200 transition-all">
+                    <input
+                      type="checkbox"
+                      checked={showClosedChats}
+                      onChange={(e) => setShowClosedChats(e.target.checked)}
+                      className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-2.5 h-2.5"
+                    />
+                    <span>Mostrar Concluídas</span>
+                  </label>
+                </div>
                 <button
                   type="button"
                   onClick={handleClearClosedChats}
@@ -768,13 +830,18 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
                 </button>
               </div>
               
-              {chats.length === 0 ? (
-                <div className="grow flex items-center justify-center text-center text-slate-400 text-xs border border-dashed border-slate-100 rounded-xl py-6">
-                  Nenhuma conversa encontrada no CRM.
+              {chats.filter(c => showClosedChats || c.status !== ChatStatus.CLOSED).length === 0 ? (
+                <div className="grow flex items-center justify-center text-center text-slate-400 text-xs border border-dashed border-slate-100 rounded-xl py-6 p-4">
+                  {showClosedChats 
+                    ? "Nenhuma conversa encontrada na base." 
+                    : "Nenhuma conversa ativa no momento. Marque 'Mostrar Concluídas' para ver o histórico."
+                  }
                 </div>
               ) : (
                 <div className="space-y-2 overflow-y-auto grow pr-1">
-                  {chats.map((c) => {
+                  {chats
+                    .filter(c => showClosedChats || c.status !== ChatStatus.CLOSED)
+                    .map((c) => {
                     const isSelected = c.id === mirroredChatId;
                     const cStatus = c.status;
                     return (
