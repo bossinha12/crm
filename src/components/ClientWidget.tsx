@@ -176,16 +176,21 @@ export default function ClientWidget({ companyId, companyName, onGoBack }: Clien
     return (
       <div className="max-w-lg w-full bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden mt-6 transition-all duration-300">
         
-        {/* Header Block */}
-        <div className="bg-indigo-600 text-white p-6 relative">
-          <div className="absolute top-0 right-0 p-4 opacity-10">
+        {/* Header Block with Store Logo */}
+        <div className="bg-indigo-600 text-white p-6 relative flex flex-col sm:flex-row items-center sm:items-start gap-4">
+          <div className="absolute top-2 right-2 p-4 opacity-10 hidden sm:block">
             <MessageSquare className="w-24 h-24" />
           </div>
-          <p className="text-indigo-100 text-xs font-semibold uppercase tracking-wider">Suporte Ao Vivo</p>
-          <h2 className="text-2xl font-bold tracking-tight">{companyName}</h2>
-          <p className="text-sm text-indigo-200 mt-1">
-            Fale instantaneamente com os nossos vendedores em tempo real!
-          </p>
+          <div className="w-16 h-16 rounded-full border border-white/20 overflow-hidden shrink-0 bg-white shadow-inner flex items-center justify-center">
+            <img src="https://i.postimg.cc/8CdttXNK/Whats-App-Image-2026-06-10-at-14-30-14.jpg" referrerPolicy="no-referrer" alt="Larissa Móveis Logo" className="w-full h-full object-cover" />
+          </div>
+          <div className="relative z-10 text-center sm:text-left">
+            <p className="text-indigo-100 text-xs font-semibold uppercase tracking-wider">Suporte Ao Vivo</p>
+            <h2 className="text-2xl font-bold tracking-tight">{companyName}</h2>
+            <p className="text-sm text-indigo-200 mt-1">
+              Fale instantaneamente com os nossos vendedores em tempo real!
+            </p>
+          </div>
         </div>
 
         {/* Content Form Body */}
