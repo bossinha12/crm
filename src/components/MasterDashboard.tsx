@@ -37,7 +37,7 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
   const [oldAndClosedChats, setOldAndClosedChats] = useState<Chat[]>([]);
   const [showClosedChats, setShowClosedChats] = useState(false);
 
-  // Load all users (Vendedores) in real time with local fallback storage
+  // Load all users (Vendedores) in real time
   useEffect(() => {
     const usersRef = collection(db, 'companies', companyId, 'users');
     const unsubUsers = onSnapshot(usersRef, (snapshot) => {
@@ -45,44 +45,9 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
       snapshot.forEach((d) => {
         list.push({ id: d.id, ...d.data() } as User);
       });
-
-      // Load offline sellers from localStorage
-      const localSellersStr = localStorage.getItem('local_sellers_atendepro');
-      let localSellers: User[] = [];
-      if (localSellersStr) {
-        try {
-          localSellers = JSON.parse(localSellersStr);
-        } catch (e) {}
-      }
-
-      // Load deleted users from localStorage
-      const deletedUsersStr = localStorage.getItem('deleted_users_atendepro');
-      let deletedUserIds: string[] = [];
-      if (deletedUsersStr) {
-        try {
-          deletedUserIds = JSON.parse(deletedUsersStr);
-        } catch (e) {}
-      }
-
-      let merged = [...list];
-      localSellers.forEach((ls) => {
-        if (!merged.some(u => u.id === ls.id)) {
-          merged.push(ls);
-        }
-      });
-
-      merged = merged.filter(u => !deletedUserIds.includes(u.id));
-      setUsers(merged);
+      setUsers(list);
     }, (error) => {
-      console.warn("Firestore snapshot users blocked, retrieving local cache:", error);
-      const localSellersStr = localStorage.getItem('local_sellers_atendepro');
-      let localSellers: User[] = [];
-      if (localSellersStr) {
-        try {
-          localSellers = JSON.parse(localSellersStr);
-        } catch (e) {}
-      }
-      setUsers(localSellers);
+      console.error("Erro em tempo real ao carregar vendedores do Firestore:", error);
     });
 
     return () => unsubUsers();
@@ -173,24 +138,13 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
       );
 
       if (usersToPurge.length > 0) {
-        const deletedUsersStr = localStorage.getItem('deleted_users_atendepro');
-        let deletedUserIds: string[] = [];
-        if (deletedUsersStr) {
+        usersToPurge.forEach(async (u) => {
           try {
-            deletedUserIds = JSON.parse(deletedUsersStr);
-          } catch (e) {}
-        }
-        let changed = false;
-        usersToPurge.forEach(u => {
-          if (!deletedUserIds.includes(u.id)) {
-            deletedUserIds.push(u.id);
-            changed = true;
+            await deleteDoc(doc(db, 'companies', companyId, 'users', u.id));
+          } catch (e) {
+            console.error("Erro ao remover usuário temporário:", e);
           }
         });
-        if (changed) {
-          localStorage.setItem('deleted_users_atendepro', JSON.stringify(deletedUserIds));
-          setUsers(prev => prev.filter(u => !deletedUserIds.includes(u.id)));
-        }
       }
     };
 
@@ -253,47 +207,15 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
       createdAt: new Date().toISOString()
     };
 
-    // Optimistically update the local state lists to make it snappy
-    setUsers(prev => {
-      const exists = prev.some(u => u.id === newUserId);
-      if (!exists) {
-        return [...prev, newUser];
-      }
-      return prev;
-    });
-
     try {
       await setDoc(doc(db, 'companies', companyId, 'users', newUserId), newUser);
       
       setNewSellerName('');
       setNewSellerPassword('');
-      setRegisterSuccess(`Vendedor "${nameToRegister}" cadastrado com sucesso!`);
+      setRegisterSuccess(`Vendedor "${nameToRegister}" cadastrado com sucesso no banco de dados!`);
     } catch (err) {
-      console.warn("Erro ao salvar vendedor no Firestore (salvando localmente):", err);
-      
-      const localSellersStr = localStorage.getItem('local_sellers_atendepro');
-      let localSellers: User[] = [];
-      if (localSellersStr) {
-        try {
-          localSellers = JSON.parse(localSellersStr);
-        } catch (e) {}
-      }
-      localSellers.push(newUser);
-      localStorage.setItem('local_sellers_atendepro', JSON.stringify(localSellers));
-
-      // Remove from deleted list if it was there before
-      const deletedUsersStr = localStorage.getItem('deleted_users_atendepro');
-      if (deletedUsersStr) {
-        try {
-          let deletedUserIds: string[] = JSON.parse(deletedUsersStr);
-          deletedUserIds = deletedUserIds.filter(id => id !== newUserId);
-          localStorage.setItem('deleted_users_atendepro', JSON.stringify(deletedUserIds));
-        } catch (e) {}
-      }
-
-      setNewSellerName('');
-      setNewSellerPassword('');
-      setRegisterError(`⚠️ Salvo apenas localmente: O vendedor "${nameToRegister}" foi cadastrado no seu navegador, mas NÃO foi possível sincronizar com o servidor (banco de dados). Ele só conseguirá entrar se usar este mesmo aparelho, até que a conexão com o servidor seja restabelecida.`);
+      console.error("Erro ao salvar vendedor no Firestore:", err);
+      setRegisterError(`Erro ao cadastrar vendedor no banco de dados. Verifique sua conexão à internet.`);
     }
   };
 
@@ -304,36 +226,13 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
     }
     if (!confirm(`Deseja mesmo remover o vendedor "${name}"? Ele perderá acesso ao painel.`)) return;
 
-    // Update state to make deletion snappy
-    setUsers(prev => prev.filter(u => u.id !== userId));
-
-    const deletedUsersStr = localStorage.getItem('deleted_users_atendepro');
-    let deletedUserIds: string[] = [];
-    if (deletedUsersStr) {
-      try {
-        deletedUserIds = JSON.parse(deletedUsersStr);
-      } catch (e) {}
-    }
-    if (!deletedUserIds.includes(userId)) {
-      deletedUserIds.push(userId);
-      localStorage.setItem('deleted_users_atendepro', JSON.stringify(deletedUserIds));
-    }
-
-    const localSellersStr = localStorage.getItem('local_sellers_atendepro');
-    if (localSellersStr) {
-      try {
-        let localSellers: User[] = JSON.parse(localSellersStr);
-        localSellers = localSellers.filter(u => u.id !== userId);
-        localStorage.setItem('local_sellers_atendepro', JSON.stringify(localSellers));
-      } catch (e) {}
-    }
-
     try {
       await deleteDoc(doc(db, 'companies', companyId, 'users', userId));
+      alert('Vendedor removido com sucesso!');
     } catch (err) {
-      console.warn("Aviso ao remover vendedor no Firestore (removido localmente):", err);
+      console.error("Erro ao remover vendedor no Firestore:", err);
+      alert('Erro ao remover o vendedor do banco de dados. Verifique sua conexão.');
     }
-    alert('Vendedor removido com sucesso!');
   };
 
   const handleClearAllData = async () => {

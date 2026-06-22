@@ -35,24 +35,6 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
         createdAt: new Date().toISOString()
       };
 
-      // Load offline sellers from localStorage
-      const localSellersStr = localStorage.getItem('local_sellers_atendepro');
-      let localSellers: User[] = [];
-      if (localSellersStr) {
-        try {
-          localSellers = JSON.parse(localSellersStr);
-        } catch (e) {}
-      }
-
-      // Load deleted users from localStorage
-      const deletedUsersStr = localStorage.getItem('deleted_users_atendepro');
-      let deletedUserIds: string[] = [];
-      if (deletedUsersStr) {
-        try {
-          deletedUserIds = JSON.parse(deletedUsersStr);
-        } catch (e) {}
-      }
-
       try {
         const usersRef = collection(db, 'companies', companyId, 'users');
         const snapshot = await getDocs(usersRef);
@@ -62,59 +44,24 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
           list.push({ id: d.id, ...d.data() } as User);
         });
 
-        // Cache firestore list for offline-resilience
-        localStorage.setItem('cached_firestore_sellers_atendepro', JSON.stringify(list));
-
         // Silently try to synchronize Larissa to Firestore
         try {
           await setDoc(doc(db, 'companies', companyId, 'users', 'admin-larissa'), larissaUser);
         } catch (syncErr) {
-          console.warn("Could not sync admin to Firestore, proceeding with local fallback:", syncErr);
+          console.warn("Could not sync admin to Firestore:", syncErr);
         }
 
-        // Merge Firestore sellers and local sellers
-        let merged = [...list];
-        localSellers.forEach((ls) => {
-          if (!merged.some(u => u.id === ls.id)) {
-            merged.push(ls);
-          }
-        });
-
-        // Filter out deleted users, admin-larissa, and duplicates
-        merged = merged.filter(u => 
+        // Filter out admin-larissa copies and any 'larissa' duplicate
+        let merged = list.filter(u => 
           u.name.toLowerCase() !== 'larissa' && 
-          u.id !== 'admin-larissa' &&
-          !deletedUserIds.includes(u.id)
+          u.id !== 'admin-larissa'
         );
 
         merged.unshift(larissaUser);
         setAvailableSellers(merged);
       } catch (err) {
-        console.warn("Aviso ao carregar usuários inicial, usando locais:", err);
-        
-        // Load cached firestore list
-        const cachedFirestoreSellersStr = localStorage.getItem('cached_firestore_sellers_atendepro');
-        let cachedList: User[] = [];
-        if (cachedFirestoreSellersStr) {
-          try {
-            cachedList = JSON.parse(cachedFirestoreSellersStr);
-          } catch (e) {}
-        }
-
-        let merged = [...cachedList];
-        localSellers.forEach((ls) => {
-          if (!merged.some(u => u.id === ls.id)) {
-            merged.push(ls);
-          }
-        });
-
-        merged = merged.filter(u => 
-          u.name.toLowerCase() !== 'larissa' && 
-          u.id !== 'admin-larissa' &&
-          !deletedUserIds.includes(u.id)
-        );
-        merged.unshift(larissaUser);
-        setAvailableSellers(merged);
+        console.warn("Aviso ao carregar usuários inicial:", err);
+        setAvailableSellers([larissaUser]);
       }
     }
     fetchUsers();
@@ -162,7 +109,7 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
 
     // Since the user is not Larissa, they are a seller. Sellers do not require password authentication, but must be registered!
     try {
-      // 1. Try matching with currently loaded list
+      // 1. Try matching with currently loaded list from Firestore
       const stateMatch = availableSellers.find(u => sanitizeInput(u.name) === inputName && u.role === 'seller');
       if (stateMatch) {
         onLoginSuccess(stateMatch);
@@ -170,43 +117,14 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
         return;
       }
 
-      // 2. Direct check localStorage list for offline matching sellers
-      const localSellersStr = localStorage.getItem('local_sellers_atendepro');
-      let localSellers: User[] = [];
-      if (localSellersStr) {
-        try {
-          localSellers = JSON.parse(localSellersStr);
-        } catch (e) {}
-      }
-
-      const deletedUsersStr = localStorage.getItem('deleted_users_atendepro');
-      let deletedUserIds: string[] = [];
-      if (deletedUsersStr) {
-        try {
-          deletedUserIds = JSON.parse(deletedUsersStr);
-        } catch (e) {}
-      }
-
-      const localMatch = localSellers.find(
-        (u) => sanitizeInput(u.name) === inputName && 
-               u.role === 'seller' && 
-               !deletedUserIds.includes(u.id)
-      );
-
-      if (localMatch) {
-        onLoginSuccess(localMatch);
-        setLoading(false);
-        return;
-      }
-
-      // 3. Query Firestore users collection for a matching seller name
+      // 2. Direct check Firestore users collection for a matching seller name
       const usersRef = collection(db, 'companies', companyId, 'users');
       const snapshot = await getDocs(usersRef);
       let matchedSearch: User | null = null;
       
       snapshot.forEach((docItem) => {
         const data = docItem.data();
-        if (sanitizeInput(String(data.name || '')) === inputName && data.role === 'seller' && !deletedUserIds.includes(docItem.id)) {
+        if (sanitizeInput(String(data.name || '')) === inputName && data.role === 'seller') {
           matchedSearch = { id: docItem.id, ...data } as User;
         }
       });
@@ -217,13 +135,11 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
         return;
       }
 
-      // If they are not found in Firestore or localStorage, they cannot log in.
-      setError('Vendedor não encontrado. Aguarde que a administradora Larissa realize o seu cadastro.');
+      // If they are not found in Firestore, they cannot log in.
+      setError('Vendedor não cadastrado. Se você já tem cadastro, verifique a grafia do nome ou peça para a Larissa cadastrar novamente.');
     } catch (err) {
       console.error("Critical error during login verification:", err);
-      // Fallback: If network/Firestore blocked us, but we checked availableSellers and localStorage first,
-      // then any registered seller would already be logged in. Reaching here means they are really not found.
-      setError('Vendedor não encontrado. Aguarde que a administradora Larissa realize o seu cadastro.');
+      setError('Erro de conexão ao verificar cadastro. Por favor, tente novamente.');
     } finally {
       setLoading(false);
     }
