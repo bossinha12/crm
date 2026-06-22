@@ -249,6 +249,7 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
       id: newUserId,
       name: nameToRegister,
       role: 'seller',
+      password: '',
       createdAt: new Date().toISOString()
     };
 
