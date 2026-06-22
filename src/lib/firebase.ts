@@ -8,9 +8,9 @@ const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
 // CRITICAL: Must use firestoreDatabaseId for custom provisioned databases under enterprise, forcing long-polling to bypass WebSocket restrictions in nested browsers/iframes.
 // GitHub Sync Trigger: Added robust offline compatibility check to ensure multi-browser connections work seamlessly.
-export const db = initializeFirestore(app, {
-  experimentalForceLongPolling: true,
-}, firebaseConfig.firestoreDatabaseId);
+export const db = firebaseConfig.firestoreDatabaseId
+  ? initializeFirestore(app, { experimentalForceLongPolling: true }, firebaseConfig.firestoreDatabaseId)
+  : initializeFirestore(app, { experimentalForceLongPolling: true });
 
 export const auth = getAuth(app);
 

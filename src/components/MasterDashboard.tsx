@@ -215,7 +215,8 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
       setRegisterSuccess(`Vendedor "${nameToRegister}" cadastrado com sucesso no banco de dados!`);
     } catch (err) {
       console.error("Erro ao salvar vendedor no Firestore:", err);
-      setRegisterError(`Erro ao cadastrar vendedor no banco de dados. Verifique sua conexão à internet.`);
+      const detailedError = err instanceof Error ? err.message : String(err);
+      setRegisterError(`Erro ao cadastrar vendedor no banco de dados: ${detailedError}`);
     }
   };
 
