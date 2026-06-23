@@ -56,6 +56,30 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 }
 
 /**
+ * Recursively removes all keys with undefined values from an object,
+ * ensuring it is fully compatible with Firestore's write constraints.
+ */
+export function sanitizeFirestoreData<T extends object>(obj: T): T {
+  const clean = (item: any): any => {
+    if (item === null || item === undefined) return null;
+    if (Array.isArray(item)) {
+      return item.map(clean);
+    }
+    if (typeof item === 'object') {
+      const copy: any = {};
+      Object.keys(item).forEach((key) => {
+        if (item[key] !== undefined) {
+          copy[key] = clean(item[key]);
+        }
+      });
+      return copy;
+    }
+    return item;
+  };
+  return clean(obj);
+}
+
+/**
  * Validates active client connections to firestore in real time.
  */
 export async function testFirestoreConnection() {

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { collection, onSnapshot, query, orderBy, doc, setDoc, deleteDoc, getDocs } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { db, handleFirestoreError, OperationType, sanitizeFirestoreData } from '../lib/firebase';
 import { User, Chat, Message, ChatStatus } from '../types';
 import { 
   BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer 
@@ -251,7 +251,7 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
     });
 
     try {
-      await setDoc(doc(db, 'companies', companyId, 'users', newUserId), newUser);
+      await setDoc(doc(db, 'companies', companyId, 'users', newUserId), sanitizeFirestoreData(newUser));
       setNewSellerName('');
       setNewSellerPassword('');
       setRegisterSuccess(`Vendedor "${nameToRegister}" cadastrado com sucesso!`);

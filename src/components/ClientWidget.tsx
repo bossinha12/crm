@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { doc, setDoc, collection, onSnapshot, query, orderBy, addDoc, updateDoc, getDoc } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { db, handleFirestoreError, OperationType, sanitizeFirestoreData } from '../lib/firebase';
 import { Chat, Message, ChatStatus } from '../types';
 import { Send, MessageSquare, Phone, User, CheckCheck, Landmark, RefreshCw, XCircle } from 'lucide-react';
 
@@ -121,7 +121,7 @@ export default function ClientWidget({ companyId, companyName, onGoBack }: Clien
       id: newChatId,
       companyId,
       clientName: clientName.trim(),
-      clientPhone: clientPhone.trim() || undefined,
+      clientPhone: clientPhone.trim() || "",
       status: ChatStatus.NEW,
       unreadBySeller: true,
       unreadByClient: false,
@@ -150,18 +150,18 @@ export default function ClientWidget({ companyId, companyName, onGoBack }: Clien
 
     try {
       // Create new chat doc in Firestore silently
-      await setDoc(doc(db, 'companies', companyId, 'chats', newChatId), generatedChat);
+      await setDoc(doc(db, 'companies', companyId, 'chats', newChatId), sanitizeFirestoreData(generatedChat));
 
       // Create first message if provided in Firestore silently
       const messagesRef = collection(db, 'companies', companyId, 'chats', newChatId, 'messages');
-      await addDoc(messagesRef, {
+      await addDoc(messagesRef, sanitizeFirestoreData({
         chatId: newChatId,
         companyId,
         senderType: 'client',
         senderName: clientName.trim(),
         text: firstMsgText,
         createdAt: new Date().toISOString()
-      });
+      }));
       console.log("Chamado criado com sucesso no banco remoto Firestore.");
     } catch (err) {
       console.warn("Aviso: Conexão do Firestore com instabilidade. Operando em contingência local:", err);
@@ -214,24 +214,43 @@ export default function ClientWidget({ companyId, companyName, onGoBack }: Clien
 
     try {
       const messagesRef = collection(db, 'companies', companyId, 'chats', chatId, 'messages');
-      await addDoc(messagesRef, {
+      await addDoc(messagesRef, sanitizeFirestoreData({
         chatId,
         companyId,
         senderType: 'client',
         senderName: activeChat?.clientName || 'Cliente',
         text: messageText,
         createdAt: new Date().toISOString()
-      });
+      }));
 
       // Update Chat record status
       const chatDocRef = doc(db, 'companies', companyId, 'chats', chatId);
-      await updateDoc(chatDocRef, {
+      
+      const chatPayload = activeChat ? {
+        ...activeChat,
         lastMessage: messageText,
         lastMessageAt: new Date().toISOString(),
-        lastMessageSender: 'client',
+        lastMessageSender: 'client' as const,
         unreadBySeller: true,
         updatedAt: new Date().toISOString()
-      });
+      } : {
+        id: chatId,
+        companyId,
+        clientName: 'Cliente',
+        clientPhone: '',
+        status: ChatStatus.NEW,
+        unreadBySeller: true,
+        unreadByClient: false,
+        lastMessage: messageText,
+        lastMessageAt: new Date().toISOString(),
+        lastMessageSender: 'client' as const,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      // Using setDoc with merge: true ensures that even if the customer's chat document doesn't exist in Firestore,
+      // it gets completely created/reconstructed instantly on message delivery.
+      await setDoc(chatDocRef, sanitizeFirestoreData(chatPayload), { merge: true });
     } catch (err) {
       console.warn("Aviso: Conexão remota offline para enviar mensagens. Guardadas localmente no navegador por enquanto.", err);
     }

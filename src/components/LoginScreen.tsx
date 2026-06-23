@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { collection, getDocs, doc, setDoc, onSnapshot } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { db, sanitizeFirestoreData } from '../lib/firebase';
 import { User } from '../types';
 import { LogIn, Key, Compass, ShieldAlert, Sparkles } from 'lucide-react';
 
@@ -131,7 +131,7 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
       
       // Sync Larissa admin user to Firestore
       try {
-        await setDoc(doc(db, 'companies', companyId, 'users', 'admin-larissa'), larissaAdmin);
+        await setDoc(doc(db, 'companies', companyId, 'users', 'admin-larissa'), sanitizeFirestoreData(larissaAdmin));
       } catch (syncErr) {
         console.warn("Could not sync admin:", syncErr);
       }
@@ -203,7 +203,7 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
 
       // Save to Firestore
       try {
-        await setDoc(doc(db, 'companies', companyId, 'users', newUserId), newSeller);
+        await setDoc(doc(db, 'companies', companyId, 'users', newUserId), sanitizeFirestoreData(newSeller));
       } catch (dbErr) {
         console.warn("Aviso ao auto-cadastrar vendedor no Firestore:", dbErr);
       }

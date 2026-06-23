@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { collection, onSnapshot, query, orderBy, doc, updateDoc, addDoc, getDoc } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { db, handleFirestoreError, OperationType, sanitizeFirestoreData } from '../lib/firebase';
 import { Chat, User, Message, ChatStatus } from '../types';
 import { crmAlarm } from '../lib/audio';
 import { 
@@ -170,7 +170,7 @@ export default function SellerDashboard({ companyId, sellerUser, onLogout }: Sel
         const chatDocRef = doc(db, 'companies', companyId, 'chats', selectedChatId);
         getDoc(chatDocRef).then((snap) => {
           if (snap.exists()) {
-            updateDoc(chatDocRef, { unreadBySeller: false }).catch(err => console.log("Erro auto-read vendedor:", err));
+            updateDoc(chatDocRef, sanitizeFirestoreData({ unreadBySeller: false })).catch(err => console.log("Erro auto-read vendedor:", err));
           }
         }).catch(err => console.log("Erro ao checar chat antes de auto-read:", err));
       }
@@ -191,24 +191,24 @@ export default function SellerDashboard({ companyId, sellerUser, onLogout }: Sel
     try {
       const chatDocRef = doc(db, 'companies', companyId, 'chats', chat.id);
       
-      await updateDoc(chatDocRef, {
+      await updateDoc(chatDocRef, sanitizeFirestoreData({
         status: ChatStatus.ACTIVE,
         sellerId: sellerUser.id,
         sellerName: sellerUser.name,
         unreadBySeller: false,
         updatedAt: new Date().toISOString()
-      });
+      }));
 
       // Add a system welcome alert message inside stream
       const messagesRef = collection(db, 'companies', companyId, 'chats', chat.id, 'messages');
-      await addDoc(messagesRef, {
+      await addDoc(messagesRef, sanitizeFirestoreData({
         chatId: chat.id,
         companyId,
         senderType: 'seller',
         senderName: 'Sistema',
         text: `O atendimento foi assumido por: **${sellerUser.name}**`,
         createdAt: new Date().toISOString()
-      });
+      }));
 
       setSelectedChatId(chat.id);
     } catch (err) {
@@ -227,24 +227,24 @@ export default function SellerDashboard({ companyId, sellerUser, onLogout }: Sel
 
     try {
       const messagesRef = collection(db, 'companies', companyId, 'chats', selectedChatId, 'messages');
-      await addDoc(messagesRef, {
+      await addDoc(messagesRef, sanitizeFirestoreData({
         chatId: selectedChatId,
         companyId,
         senderType: 'seller',
         senderName: sellerUser.name,
         text: finalMsgText,
         createdAt: new Date().toISOString()
-      });
+      }));
 
       const chatDocRef = doc(db, 'companies', companyId, 'chats', selectedChatId);
-      await updateDoc(chatDocRef, {
+      await updateDoc(chatDocRef, sanitizeFirestoreData({
         lastMessage: finalMsgText,
         lastMessageAt: new Date().toISOString(),
         lastMessageSender: 'seller',
         unreadByClient: true,
         unreadBySeller: false,
         updatedAt: new Date().toISOString()
-      });
+      }));
     } catch (err) {
       console.error("Erro ao enviar mensagem:", err);
     }
@@ -256,21 +256,21 @@ export default function SellerDashboard({ companyId, sellerUser, onLogout }: Sel
 
     try {
       const chatDocRef = doc(db, 'companies', companyId, 'chats', selectedChatId);
-      await updateDoc(chatDocRef, {
+      await updateDoc(chatDocRef, sanitizeFirestoreData({
         status: ChatStatus.CLOSED,
         updatedAt: new Date().toISOString()
-      });
+      }));
 
       // System notification
       const messagesRef = collection(db, 'companies', companyId, 'chats', selectedChatId, 'messages');
-      await addDoc(messagesRef, {
+      await addDoc(messagesRef, sanitizeFirestoreData({
         chatId: selectedChatId,
         companyId,
         senderType: 'seller',
         senderName: 'Sistema',
         text: `--- Atendimento encerrado por ${sellerUser.name} ---`,
         createdAt: new Date().toISOString()
-      });
+      }));
 
       setSelectedChatId(null);
     } catch (err) {
