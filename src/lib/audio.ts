@@ -2,11 +2,48 @@ class CRMAlarm {
   private audioCtx: AudioContext | null = null;
   private intervalId: any = null;
   private isPlaying = false;
+  private isMuted = false;
+
+  public setMuted(muted: boolean) {
+    this.isMuted = muted;
+    if (muted) {
+      this.stop();
+    }
+  }
+
+  public getMuted() {
+    return this.isMuted;
+  }
+
+  /**
+   * Plays a quick sweet notification beep to confirm audio is active and unlocked.
+   */
+  public playTestBeep() {
+    try {
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContextClass) return;
+      const ctx = new AudioContextClass();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(0, ctx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.1, ctx.currentTime + 0.05);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.3);
+    } catch (e) {
+      console.warn("Test beep blocked or failed:", e);
+    }
+  }
 
   /**
    * Starts the synthetic telephonic ringtone calling notification.
    */
   public start() {
+    if (this.isMuted) return;
     if (this.isPlaying) return;
     this.isPlaying = true;
 
@@ -20,7 +57,7 @@ class CRMAlarm {
       this.audioCtx = new AudioContextClass();
       
       const triggerRingPulse = () => {
-        if (!this.audioCtx) return;
+        if (this.isMuted || !this.audioCtx) return;
         
         try {
           if (this.audioCtx.state === 'suspended') {

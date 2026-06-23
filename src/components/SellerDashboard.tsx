@@ -22,6 +22,33 @@ export default function SellerDashboard({ companyId, sellerUser, onLogout }: Sel
   const [alarmIsSounding, setAlarmIsSounding] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
 
+  // Mute preference and auto-registration setup with CRMAlarm
+  const [soundMuted, setSoundMuted] = useState(() => {
+    const saved = localStorage.getItem('atendepro_sound_muted');
+    const isMuted = saved === 'true';
+    crmAlarm.setMuted(isMuted);
+    return isMuted;
+  });
+
+  const toggleSound = () => {
+    const nextMuted = !soundMuted;
+    setSoundMuted(nextMuted);
+    crmAlarm.setMuted(nextMuted);
+    localStorage.setItem('atendepro_sound_muted', String(nextMuted));
+    
+    if (!nextMuted) {
+      crmAlarm.playTestBeep();
+      const hasPending = chats.some(c => c.status === ChatStatus.NEW);
+      if (hasPending) {
+        setAlarmIsSounding(true);
+        crmAlarm.start();
+      }
+    } else {
+      crmAlarm.stop();
+      setAlarmIsSounding(false);
+    }
+  };
+
   // Template Quick Answers
   const replies = [
     'Olá! Me chamo ' + sellerUser.name + ', como posso te ajudar hoje?',
@@ -55,8 +82,8 @@ export default function SellerDashboard({ companyId, sellerUser, onLogout }: Sel
 
       setAvailableChats(list);
 
-      // Sound management rules: Alarm rings if there are pending chats in status 'new'
-      if (pendingAlertCount > 0) {
+      // Sound management rules: Alarm rings if there are pending chats in status 'new' and sound is not muted
+      if (pendingAlertCount > 0 && !crmAlarm.getMuted()) {
         setAlarmIsSounding(true);
         crmAlarm.start();
       } else {
@@ -64,7 +91,7 @@ export default function SellerDashboard({ companyId, sellerUser, onLogout }: Sel
         crmAlarm.stop();
       }
     }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, `companies/${companyId}/chats`);
+      console.warn("Aviso ao carregar chats do Firestore em tempo real (usando contingência):", error);
     });
 
     return () => {
@@ -127,7 +154,7 @@ export default function SellerDashboard({ companyId, sellerUser, onLogout }: Sel
         }).catch(err => console.log("Erro ao checar chat antes de auto-read:", err));
       }
     }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, `companies/${companyId}/chats/${selectedChatId}/messages`);
+      console.warn("Aviso ao carregar mensagens do Firestore em tempo real (usando contingência):", error);
     });
 
     return () => unsubMessages();
@@ -260,16 +287,34 @@ export default function SellerDashboard({ companyId, sellerUser, onLogout }: Sel
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          {/* Audio Alarm Indicator indicator */}
-          {alarmIsSounding ? (
+          {/* Audio Alarm Controller (Click to test/unmute) */}
+          <button
+            onClick={toggleSound}
+            className={`text-xs font-semibold px-3.5 py-1.5 rounded-xl flex items-center gap-2 transition-all cursor-pointer ${
+              soundMuted 
+                ? 'bg-rose-950/40 hover:bg-rose-950/60 border border-rose-900/30 text-rose-400 animate-pulse' 
+                : 'bg-emerald-950/40 hover:bg-emerald-950/60 border border-emerald-900/30 text-emerald-400'
+            }`}
+            title={soundMuted ? 'Clique para Ativar Alarme Sonoro' : 'Clique para Silenciar Alarme Sonoro'}
+          >
+            {soundMuted ? (
+              <>
+                <VolumeX className="w-4 h-4 shrink-0 text-rose-400" />
+                <span>Campainha Silenciada (Ativar Som 🔊)</span>
+              </>
+            ) : (
+              <>
+                <Volume2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                <span>Campainha Ativada (Som Ativo)</span>
+              </>
+            )}
+          </button>
+
+          {/* Audio Alarm Status Alert */}
+          {alarmIsSounding && !soundMuted && (
             <div className="bg-amber-500/15 border border-amber-500/20 text-amber-500 text-xs px-3.5 py-1.5 rounded-xl flex items-center gap-2 animate-bounce">
               <Volume2 className="w-4 h-4 text-amber-400 rotate-12 shrink-0 animate-ping" />
-              <span className="font-bold">Campainha Tocando! Atenda o suporte.</span>
-            </div>
-          ) : (
-            <div className="bg-slate-800 border border-slate-700/80 text-slate-400 text-xs px-3 py-1.5 rounded-xl flex items-center gap-2">
-              <VolumeX className="w-4 h-4 shrink-0 text-slate-500" />
-              <span>Sons Carregados e Silenciados</span>
+              <span className="font-bold">Cliente Chamando! Atenda o suporte.</span>
             </div>
           )}
 
