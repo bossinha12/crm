@@ -73,15 +73,17 @@ export default function SellerDashboard({ companyId, sellerUser, onLogout }: Sel
     };
   }, [companyId]);
 
-  // Hook to log out if the seller's user document is deleted from Firestore
+  // Hook to log out if the seller's user document is deleted from Firestore (server confirmed)
   useEffect(() => {
     if (sellerUser.id === 'admin-larissa') return;
     const userDocRef = doc(db, 'companies', companyId, 'users', sellerUser.id);
-    const unsubUser = onSnapshot(userDocRef, (snapshot) => {
-      if (!snapshot.exists()) {
+    const unsubUser = onSnapshot(userDocRef, (snapshot: any) => {
+      if (!snapshot.exists() && !snapshot.metadata?.fromCache) {
         alert("Atenção: Seu perfil de vendedor foi removido pelo administrador. Você foi desconectado.");
         onLogout();
       }
+    }, (error) => {
+      console.warn("Aviso ao monitorar perfil do vendedor no Firestore:", error);
     });
     return () => unsubUser();
   }, [sellerUser.id, companyId, onLogout]);

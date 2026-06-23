@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, getDocs, doc, setDoc } from 'firebase/firestore';
+import { collection, getDocs, doc, setDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { User } from '../types';
 import { LogIn, Key, Compass, ShieldAlert, Sparkles } from 'lucide-react';
@@ -24,35 +24,32 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
   const [error, setError] = useState<string | null>(null);
   const [availableSellers, setAvailableSellers] = useState<User[]>([]);
 
-  // Periodically fetch registered employees to make login select options or quick selections available
+  // Listen to registered employees in real-time to make login select options or quick selections available instantly
   useEffect(() => {
-    async function fetchUsers() {
-      const larissaUser: User = {
-        id: 'admin-larissa',
-        name: 'Larissa',
-        password: '13259898',
-        role: 'admin',
-        createdAt: new Date().toISOString()
-      };
+    const larissaUser: User = {
+      id: 'admin-larissa',
+      name: 'Larissa',
+      password: '13259898',
+      role: 'admin',
+      createdAt: new Date().toISOString()
+    };
 
-      let firestoreList: User[] = [];
+    // Silently synchronize Larissa to Firestore
+    const syncAdmin = async () => {
       try {
-        const usersRef = collection(db, 'companies', companyId, 'users');
-        const snapshot = await getDocs(usersRef);
-        
-        snapshot.forEach((d) => {
-          firestoreList.push({ id: d.id, ...d.data() } as User);
-        });
-
-        // Silently try to synchronize Larissa to Firestore
-        try {
-          await setDoc(doc(db, 'companies', companyId, 'users', 'admin-larissa'), larissaUser);
-        } catch (syncErr) {
-          console.warn("Could not sync admin to Firestore:", syncErr);
-        }
-      } catch (err) {
-        console.warn("Aviso ao carregar usuários inicial:", err);
+        await setDoc(doc(db, 'companies', companyId, 'users', 'admin-larissa'), larissaUser);
+      } catch (syncErr) {
+        console.warn("Could not sync admin to Firestore:", syncErr);
       }
+    };
+    syncAdmin();
+
+    const usersRef = collection(db, 'companies', companyId, 'users');
+    const unsub = onSnapshot(usersRef, (snapshot) => {
+      const firestoreList: User[] = [];
+      snapshot.forEach((d) => {
+        firestoreList.push({ id: d.id, ...d.data() } as User);
+      });
 
       // Load from local storage fallback
       const savedLocal = localStorage.getItem('atendepro_local_users');
@@ -70,6 +67,9 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
 
       const mergedList = Array.from(userMap.values());
 
+      // Save sync back to localStorage
+      localStorage.setItem('atendepro_local_users', JSON.stringify(mergedList));
+
       // Filter out admin-larissa copies and any 'larissa' duplicate
       let filtered = mergedList.filter(u => 
         u.name.toLowerCase() !== 'larissa' && 
@@ -78,8 +78,27 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
 
       filtered.unshift(larissaUser);
       setAvailableSellers(filtered);
-    }
-    fetchUsers();
+    }, (error) => {
+      console.warn("Aviso ao carregar usuários em tempo real, usando fallback local:", error);
+      
+      const savedLocal = localStorage.getItem('atendepro_local_users');
+      let localUsersList: User[] = [];
+      if (savedLocal) {
+        try {
+          localUsersList = JSON.parse(savedLocal);
+        } catch (e) {}
+      }
+
+      let filtered = localUsersList.filter(u => 
+        u.name.toLowerCase() !== 'larissa' && 
+        u.id !== 'admin-larissa'
+      );
+
+      filtered.unshift(larissaUser);
+      setAvailableSellers(filtered);
+    });
+
+    return () => unsub();
   }, [companyId]);
 
   const handleLogin = async (e: React.FormEvent) => {
