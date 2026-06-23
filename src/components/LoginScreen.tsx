@@ -35,13 +35,13 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
         createdAt: new Date().toISOString()
       };
 
+      let firestoreList: User[] = [];
       try {
         const usersRef = collection(db, 'companies', companyId, 'users');
         const snapshot = await getDocs(usersRef);
         
-        let list: User[] = [];
         snapshot.forEach((d) => {
-          list.push({ id: d.id, ...d.data() } as User);
+          firestoreList.push({ id: d.id, ...d.data() } as User);
         });
 
         // Silently try to synchronize Larissa to Firestore
@@ -50,19 +50,34 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
         } catch (syncErr) {
           console.warn("Could not sync admin to Firestore:", syncErr);
         }
-
-        // Filter out admin-larissa copies and any 'larissa' duplicate
-        let merged = list.filter(u => 
-          u.name.toLowerCase() !== 'larissa' && 
-          u.id !== 'admin-larissa'
-        );
-
-        merged.unshift(larissaUser);
-        setAvailableSellers(merged);
       } catch (err) {
         console.warn("Aviso ao carregar usuários inicial:", err);
-        setAvailableSellers([larissaUser]);
       }
+
+      // Load from local storage fallback
+      const savedLocal = localStorage.getItem('atendepro_local_users');
+      let localUsersList: User[] = [];
+      if (savedLocal) {
+        try {
+          localUsersList = JSON.parse(savedLocal);
+        } catch (e) {}
+      }
+
+      // Merge and keep unique IDs
+      const userMap = new Map<string, User>();
+      localUsersList.forEach(u => userMap.set(u.id, u));
+      firestoreList.forEach(u => userMap.set(u.id, u));
+
+      const mergedList = Array.from(userMap.values());
+
+      // Filter out admin-larissa copies and any 'larissa' duplicate
+      let filtered = mergedList.filter(u => 
+        u.name.toLowerCase() !== 'larissa' && 
+        u.id !== 'admin-larissa'
+      );
+
+      filtered.unshift(larissaUser);
+      setAvailableSellers(filtered);
     }
     fetchUsers();
   }, [companyId]);
@@ -109,7 +124,7 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
 
     // Since the user is not Larissa, they are a seller. Sellers do not require password authentication, but must be registered!
     try {
-      // 1. Try matching with currently loaded list from Firestore
+      // 1. Try matching with currently loaded list (which includes merged Firestore & localStorage)
       const stateMatch = availableSellers.find(u => sanitizeInput(u.name) === inputName && u.role === 'seller');
       if (stateMatch) {
         onLoginSuccess(stateMatch);
@@ -135,11 +150,44 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
         return;
       }
 
-      // If they are not found in Firestore, they cannot log in.
+      // 3. Fallback: Check local storage direct
+      const savedLocal = localStorage.getItem('atendepro_local_users');
+      let localUsersList: User[] = [];
+      if (savedLocal) {
+        try {
+          localUsersList = JSON.parse(savedLocal);
+        } catch (e) {}
+      }
+
+      const localMatch = localUsersList.find(u => sanitizeInput(u.name) === inputName && u.role === 'seller');
+      if (localMatch) {
+        onLoginSuccess(localMatch);
+        setLoading(false);
+        return;
+      }
+
+      // If they are not found, we reject
       setError('Vendedor não cadastrado. Se você já tem cadastro, verifique a grafia do nome ou peça para a Larissa cadastrar novamente.');
     } catch (err) {
-      console.error("Critical error during login verification:", err);
-      setError('Erro de conexão ao verificar cadastro. Por favor, tente novamente.');
+      console.warn("Aviso durante verificação de login, usando fallback local:", err);
+      
+      // If we got a connection/permission error from Firestore, check localStorage as a safe fallback
+      const savedLocal = localStorage.getItem('atendepro_local_users');
+      let localUsersList: User[] = [];
+      if (savedLocal) {
+        try {
+          localUsersList = JSON.parse(savedLocal);
+        } catch (e) {}
+      }
+
+      const localMatch = localUsersList.find(u => sanitizeInput(u.name) === inputName && u.role === 'seller');
+      if (localMatch) {
+        onLoginSuccess(localMatch);
+        setLoading(false);
+        return;
+      }
+
+      setError('Vendedor não cadastrado ou erro de rede. Verifique o nome ou tente novamente.');
     } finally {
       setLoading(false);
     }
