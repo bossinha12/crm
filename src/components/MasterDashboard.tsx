@@ -725,7 +725,7 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
             className={`text-xs bg-rose-950/80 hover:bg-rose-900 border border-rose-800 rounded-xl px-4 py-2 font-bold text-rose-200 flex items-center gap-1.5 transition-all shadow-md shadow-rose-950/20 ${isClearing ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
             <Trash2 className="w-3.5 h-3.5" />
-            <span>{isClearing ? 'Limpando Banco...' : 'Limpar Históricos de Teste'}</span>
+            <span>{isClearing ? 'Limpando Banco...' : 'Limpar Histórico'}</span>
           </button>
 
           <button
