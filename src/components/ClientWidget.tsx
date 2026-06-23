@@ -15,6 +15,7 @@ export default function ClientWidget({ companyId, companyName, onGoBack }: Clien
   const [activeChat, setActiveChat] = useState<Chat | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   // Form Fields for new chat request
   const [clientName, setClientName] = useState(() => localStorage.getItem('atendepro_client_name') || '');
@@ -55,6 +56,7 @@ export default function ClientWidget({ companyId, companyName, onGoBack }: Clien
       }
     }, (error) => {
       console.warn("Aviso ao carregar chat ao vivo em tempo real, usando backup local:", error);
+      setSyncError(error instanceof Error ? error.message : String(error));
       const savedChat = localStorage.getItem(`atendepro_backup_chat_${chatId}`);
       if (savedChat) {
         try {
@@ -94,6 +96,7 @@ export default function ClientWidget({ companyId, companyName, onGoBack }: Clien
       }
     }, (error) => {
       console.warn("Aviso ao carregar mensagens ao vivo em tempo real, usando backup local:", error);
+      setSyncError(error instanceof Error ? error.message : String(error));
       const savedMsgs = localStorage.getItem(`atendepro_backup_msgs_${chatId}`);
       if (savedMsgs) {
         try {
@@ -167,8 +170,10 @@ export default function ClientWidget({ companyId, companyName, onGoBack }: Clien
         createdAt: new Date().toISOString()
       }));
       console.log("Chamado criado com sucesso no banco remoto Firestore.");
+      setSyncError(null);
     } catch (err) {
       console.warn("Aviso: Conexão do Firestore com instabilidade. Operando em contingência local:", err);
+      setSyncError(err instanceof Error ? err.message : String(err));
       // We don't block the client with a generic error alert anymore!
     } finally {
       // Always transition into live chat immediately using local/state backup
@@ -255,8 +260,10 @@ export default function ClientWidget({ companyId, companyName, onGoBack }: Clien
       // Using setDoc with merge: true ensures that even if the customer's chat document doesn't exist in Firestore,
       // it gets completely created/reconstructed instantly on message delivery.
       await setDoc(chatDocRef, sanitizeFirestoreData(chatPayload), { merge: true });
+      setSyncError(null);
     } catch (err) {
       console.warn("Aviso: Conexão remota offline para enviar mensagens. Guardadas localmente no navegador por enquanto.", err);
+      setSyncError(err instanceof Error ? err.message : String(err));
     }
   };
 
@@ -426,6 +433,21 @@ export default function ClientWidget({ companyId, companyName, onGoBack }: Clien
           </button>
         </div>
       </div>
+
+      {syncError && (
+        <div className="bg-amber-50 border-b border-amber-200 text-amber-800 text-[11px] sm:text-xs px-4 py-2.5 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5">
+            <span className="font-semibold text-amber-600">⚠️ Conexão em Contingência Local:</span>
+            <span>Mensagens salvas localmente no navegador por instabilidade de rede ou permissão ({syncError})</span>
+          </div>
+          <button 
+            onClick={() => setSyncError(null)} 
+            className="text-amber-500 hover:text-amber-700 font-bold px-1.5 py-0.5 hover:bg-amber-100 rounded cursor-pointer text-xs"
+          >
+            Dispensar
+          </button>
+        </div>
+      )}
 
       {/* Messages Scroll Area */}
       <div className="grow overflow-y-auto p-5 space-y-4 bg-white" id="messages-stream">
