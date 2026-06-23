@@ -141,7 +141,9 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
       return;
     }
 
-    // Since the user is not Larissa, they are a seller. Sellers do not require password authentication, but must be registered!
+    // Since the user is not Larissa, they are a seller. Sellers do not require password authentication.
+    // If they are not found in the loaded list, Firestore, or local backup, we auto-register them in real-time
+    // to guarantee they are recognized instantly and successfully logged in!
     try {
       // 1. Try matching with currently loaded list (which includes merged Firestore & localStorage)
       const stateMatch = availableSellers.find(u => sanitizeInput(u.name) === inputName && u.role === 'seller');
@@ -185,10 +187,33 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
         return;
       }
 
-      // If they are not found, we reject
-      setError('Vendedor não cadastrado. Se você já tem cadastro, verifique a grafia do nome ou peça para a Larissa cadastrar novamente.');
+      // 4. If they are not registered yet, we dynamically register them on-the-fly!
+      const newUserId = 'seller_' + Math.random().toString(36).substring(2, 9);
+      const newSeller: User = {
+        id: newUserId,
+        name: username.trim(), // Keep exact casing typed by the user
+        role: 'seller',
+        password: '',
+        createdAt: new Date().toISOString()
+      };
+
+      // Save to localStorage
+      localUsersList.push(newSeller);
+      localStorage.setItem('atendepro_local_users', JSON.stringify(localUsersList));
+
+      // Save to Firestore
+      try {
+        await setDoc(doc(db, 'companies', companyId, 'users', newUserId), newSeller);
+      } catch (dbErr) {
+        console.warn("Aviso ao auto-cadastrar vendedor no Firestore:", dbErr);
+      }
+
+      onLoginSuccess(newSeller);
+      setLoading(false);
+      return;
+
     } catch (err) {
-      console.warn("Aviso durante verificação de login, usando fallback local:", err);
+      console.warn("Aviso durante verificação de login, usando fallback local de auto-cadastro:", err);
       
       // If we got a connection/permission error from Firestore, check localStorage as a safe fallback
       const savedLocal = localStorage.getItem('atendepro_local_users');
@@ -206,7 +231,22 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
         return;
       }
 
-      setError('Vendedor não cadastrado ou erro de rede. Verifique o nome ou tente novamente.');
+      // In case of any error/offline, auto-create locally and proceed
+      const newUserId = 'seller_' + Math.random().toString(36).substring(2, 9);
+      const newSeller: User = {
+        id: newUserId,
+        name: username.trim(),
+        role: 'seller',
+        password: '',
+        createdAt: new Date().toISOString()
+      };
+
+      localUsersList.push(newSeller);
+      localStorage.setItem('atendepro_local_users', JSON.stringify(localUsersList));
+
+      onLoginSuccess(newSeller);
+      setLoading(false);
+      return;
     } finally {
       setLoading(false);
     }
@@ -314,7 +354,7 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
                     );
                   } else {
                     return (
-                      <span className="text-rose-600 font-semibold">⚠️ Vendedor não cadastrado. Se você já tem cadastro, verifique a grafia do nome ou peça para a Larissa cadastrar novamente.</span>
+                      <span className="text-indigo-600 font-semibold">✨ Novo vendedor detectado! Seu cadastro será ativado instantaneamente ao entrar. Nenhuma senha é necessária!</span>
                     );
                   }
                 })()}
