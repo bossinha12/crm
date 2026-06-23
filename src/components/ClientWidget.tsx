@@ -17,7 +17,7 @@ export default function ClientWidget({ companyId, companyName, onGoBack }: Clien
   const [loading, setLoading] = useState(false);
 
   // Form Fields for new chat request
-  const [clientName, setClientName] = useState('');
+  const [clientName, setClientName] = useState(() => localStorage.getItem('atendepro_client_name') || '');
   const [clientPhone, setClientPhone] = useState('');
   const [initialMsg, setInitialMsg] = useState('');
 
@@ -45,10 +45,13 @@ export default function ClientWidget({ companyId, companyName, onGoBack }: Clien
         // Save backup of this chat metadata
         localStorage.setItem(`atendepro_backup_chat_${chatId}`, JSON.stringify(chatData));
       } else {
-        // Chat was deleted on server side, wipe localStorage
-        localStorage.removeItem(`atendepro_client_chat_id`);
-        setChatId(null);
-        setActiveChat(null);
+        // Only wipe if there was an active chat previously loaded (meaning it was actually deleted on the server side)
+        if (activeChatRef.current) {
+          localStorage.removeItem(`atendepro_client_chat_id`);
+          localStorage.removeItem('atendepro_client_name');
+          setChatId(null);
+          setActiveChat(null);
+        }
       }
     }, (error) => {
       console.warn("Aviso ao carregar chat ao vivo em tempo real, usando backup local:", error);
@@ -147,6 +150,7 @@ export default function ClientWidget({ companyId, companyName, onGoBack }: Clien
     localStorage.setItem(`atendepro_backup_chat_${newChatId}`, JSON.stringify(generatedChat));
     localStorage.setItem(`atendepro_backup_msgs_${newChatId}`, JSON.stringify([generatedFirstMsg]));
     localStorage.setItem(`atendepro_client_chat_id`, newChatId);
+    localStorage.setItem('atendepro_client_name', clientName.trim());
 
     try {
       // Create new chat doc in Firestore silently
@@ -189,7 +193,7 @@ export default function ClientWidget({ companyId, companyName, onGoBack }: Clien
       chatId,
       companyId,
       senderType: 'client',
-      senderName: activeChat?.clientName || 'Cliente',
+      senderName: activeChat?.clientName || clientName || 'Cliente',
       text: messageText,
       createdAt: new Date().toISOString()
     };
@@ -218,7 +222,7 @@ export default function ClientWidget({ companyId, companyName, onGoBack }: Clien
         chatId,
         companyId,
         senderType: 'client',
-        senderName: activeChat?.clientName || 'Cliente',
+        senderName: activeChat?.clientName || clientName || 'Cliente',
         text: messageText,
         createdAt: new Date().toISOString()
       }));
@@ -236,7 +240,7 @@ export default function ClientWidget({ companyId, companyName, onGoBack }: Clien
       } : {
         id: chatId,
         companyId,
-        clientName: 'Cliente',
+        clientName: clientName || 'Cliente',
         clientPhone: '',
         status: ChatStatus.NEW,
         unreadBySeller: true,
@@ -259,6 +263,7 @@ export default function ClientWidget({ companyId, companyName, onGoBack }: Clien
   const clearChatSession = () => {
     if (confirm('Deseja mesmo encerrar e abrir uma nova solicitação de atendimento?')) {
       localStorage.removeItem(`atendepro_client_chat_id`);
+      localStorage.removeItem('atendepro_client_name');
       setChatId(null);
       setActiveChat(null);
       setMessages([]);
