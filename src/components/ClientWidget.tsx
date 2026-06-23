@@ -25,6 +25,12 @@ export default function ClientWidget({ companyId, companyName, onGoBack }: Clien
   const [currentMessage, setCurrentMessage] = useState('');
   
   const bottomRef = useRef<HTMLDivElement>(null);
+  const activeChatRef = useRef<Chat | null>(null);
+
+  // Keep activeChatRef synced
+  useEffect(() => {
+    activeChatRef.current = activeChat;
+  }, [activeChat]);
 
   // 1. If chatId exists, listen to Chat doc and Messages subcollection in real time
   useEffect(() => {
@@ -54,21 +60,29 @@ export default function ClientWidget({ companyId, companyName, onGoBack }: Clien
       }
     });
 
-    // Messages array list listener
+    // Messages array list listener (Index-free query with robust in-memory sorting)
     const messagesCollectionRef = collection(db, 'companies', companyId, 'chats', chatId, 'messages');
-    const messagesQuery = query(messagesCollectionRef, orderBy('createdAt', 'asc'));
     
-    const unsubMessages = onSnapshot(messagesQuery, (snapshot) => {
+    const unsubMessages = onSnapshot(messagesCollectionRef, (snapshot) => {
       const msgs: Message[] = [];
       snapshot.forEach((d) => {
         msgs.push({ id: d.id, ...d.data() } as Message);
       });
+
+      // Sort in-memory by createdAt ascending
+      msgs.sort((a, b) => {
+        const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return timeA - timeB;
+      });
+
       setMessages(msgs);
       // Save backup of messages
       localStorage.setItem(`atendepro_backup_msgs_${chatId}`, JSON.stringify(msgs));
       
       // Mark read list for client side (if last message came from seller, write update to chat that customer has seen it)
-      if (activeChat && activeChat.lastMessageSender === 'seller' && activeChat.unreadByClient) {
+      const currentActiveChat = activeChatRef.current;
+      if (currentActiveChat && currentActiveChat.lastMessageSender === 'seller' && currentActiveChat.unreadByClient) {
         getDoc(chatDocRef).then((snap) => {
           if (snap.exists()) {
             updateDoc(chatDocRef, { unreadByClient: false }).catch(err => console.log("Erro auto-read client:", err));
@@ -89,7 +103,7 @@ export default function ClientWidget({ companyId, companyName, onGoBack }: Clien
       unsubChat();
       unsubMessages();
     };
-  }, [chatId, companyId, activeChat?.lastMessageSender, activeChat?.unreadByClient]);
+  }, [chatId, companyId]);
 
   // Scroll viewport down upon new messages
   useEffect(() => {

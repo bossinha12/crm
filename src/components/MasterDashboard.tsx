@@ -82,13 +82,19 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
 
   // Load all active or closed chats in real time with robust deleted exclusion filter
   useEffect(() => {
-    const chatsRef = collection(db, 'companies', companyId, 'chats');
-    const q = query(chatsRef, orderBy('createdAt', 'desc'));
+    const chatsRefCol = collection(db, 'companies', companyId, 'chats');
     
-    const unsubChats = onSnapshot(q, (snapshot) => {
+    const unsubChats = onSnapshot(chatsRefCol, (snapshot) => {
       const list: Chat[] = [];
       snapshot.forEach((d) => {
         list.push({ id: d.id, ...d.data() } as Chat);
+      });
+
+      // Sort in-memory by createdAt descending
+      list.sort((a, b) => {
+        const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return timeB - timeA;
       });
 
       const deletedChatsStr = localStorage.getItem('deleted_chats_atendepro');
@@ -168,13 +174,20 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
     }
 
     const messagesRef = collection(db, 'companies', companyId, 'chats', mirroredChatId, 'messages');
-    const q = query(messagesRef, orderBy('createdAt', 'asc'));
 
-    const unsubMirror = onSnapshot(q, (snapshot) => {
+    const unsubMirror = onSnapshot(messagesRef, (snapshot) => {
       const msgs: Message[] = [];
       snapshot.forEach((d) => {
         msgs.push({ id: d.id, ...d.data() } as Message);
       });
+
+      // Sort in-memory by createdAt ascending
+      msgs.sort((a, b) => {
+        const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return timeA - timeB;
+      });
+
       setMirroredMessages(msgs);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, `companies/${companyId}/chats/${mirroredChatId}/messages`);

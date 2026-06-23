@@ -22,6 +22,12 @@ export default function SellerDashboard({ companyId, sellerUser, onLogout }: Sel
   const [alarmIsSounding, setAlarmIsSounding] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
 
+  // Keep a synced ref of chats to prevent re-subscriptions in dependent effects
+  const chatsRef = useRef<Chat[]>([]);
+  useEffect(() => {
+    chatsRef.current = chats;
+  }, [chats]);
+
   // Mute preference and auto-registration setup with CRMAlarm
   const [soundMuted, setSoundMuted] = useState(() => {
     const saved = localStorage.getItem('atendepro_sound_muted');
@@ -38,7 +44,7 @@ export default function SellerDashboard({ companyId, sellerUser, onLogout }: Sel
     
     if (!nextMuted) {
       crmAlarm.playTestBeep();
-      const hasPending = chats.some(c => c.status === ChatStatus.NEW);
+      const hasPending = chatsRef.current.some(c => c.status === ChatStatus.NEW);
       if (hasPending) {
         setAlarmIsSounding(true);
         crmAlarm.start();
@@ -62,11 +68,11 @@ export default function SellerDashboard({ companyId, sellerUser, onLogout }: Sel
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // 1. Listen to ALL chats in real-time under this company to check new and current active assignments
+  // (Index-free query with robust in-memory sorting to survive missing index errors)
   useEffect(() => {
     const chatsCollectionRef = collection(db, 'companies', companyId, 'chats');
-    const q = query(chatsCollectionRef, orderBy('lastMessageAt', 'desc'));
 
-    const unsub = onSnapshot(q, (snapshot) => {
+    const unsub = onSnapshot(chatsCollectionRef, (snapshot) => {
       const list: Chat[] = [];
       let pendingAlertCount = 0;
 
@@ -78,6 +84,13 @@ export default function SellerDashboard({ companyId, sellerUser, onLogout }: Sel
         if (item.status === ChatStatus.NEW) {
           pendingAlertCount++;
         }
+      });
+
+      // Sort in-memory by lastMessageAt descending
+      list.sort((a, b) => {
+        const timeA = a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0;
+        const timeB = b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0;
+        return timeB - timeA;
       });
 
       setAvailableChats(list);
@@ -127,6 +140,7 @@ export default function SellerDashboard({ companyId, sellerUser, onLogout }: Sel
   }, [chats, selectedChatId]);
 
   // 2. Active Chat Messages list watcher
+  // (Index-free query with robust in-memory sorting)
   useEffect(() => {
     if (!selectedChatId) {
       setSelectedChatMessages([]);
@@ -134,17 +148,24 @@ export default function SellerDashboard({ companyId, sellerUser, onLogout }: Sel
     }
 
     const messagesRef = collection(db, 'companies', companyId, 'chats', selectedChatId, 'messages');
-    const q = query(messagesRef, orderBy('createdAt', 'asc'));
 
-    const unsubMessages = onSnapshot(q, (snapshot) => {
+    const unsubMessages = onSnapshot(messagesRef, (snapshot) => {
       const msgs: Message[] = [];
       snapshot.forEach((d) => {
         msgs.push({ id: d.id, ...d.data() } as Message);
       });
+
+      // Sort in-memory by createdAt ascending
+      msgs.sort((a, b) => {
+        const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return timeA - timeB;
+      });
+
       setSelectedChatMessages(msgs);
 
       // Automatically flag messages as read-by-seller when they inspect the tab
-      const currentChatObj = chats.find(c => c.id === selectedChatId);
+      const currentChatObj = chatsRef.current.find(c => c.id === selectedChatId);
       if (currentChatObj && currentChatObj.unreadBySeller) {
         const chatDocRef = doc(db, 'companies', companyId, 'chats', selectedChatId);
         getDoc(chatDocRef).then((snap) => {
@@ -158,7 +179,7 @@ export default function SellerDashboard({ companyId, sellerUser, onLogout }: Sel
     });
 
     return () => unsubMessages();
-  }, [selectedChatId, companyId, chats]);
+  }, [selectedChatId, companyId]);
 
   // Scroll to bottom upon receiving or dispatching messages
   useEffect(() => {
