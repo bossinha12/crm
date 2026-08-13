@@ -2,13 +2,14 @@ import React, { useState, useEffect, useRef } from 'react';
 import { collection, onSnapshot, doc, setDoc, deleteDoc, getDocs } from 'firebase/firestore';
 import { db, sanitizeFirestoreData } from '../lib/firebase';
 import { uploadToImgBB } from '../lib/imgbb';
-import { Company, CompanyLicense, LicenseStatus } from '../types';
+import { Company, CompanyLicense, LicensePlanType, LicenseStatus } from '../types';
 import { 
   Building2, Plus, ShieldCheck, ShieldAlert, Lock, Unlock, 
   Copy, Check, ExternalLink, Key, Edit3, Trash2, Search, 
   DollarSign, Clock, Users, ArrowLeft, RefreshCw, Sparkles, 
   Eye, CheckCircle2, AlertTriangle, Phone, Globe, Layers,
-  Upload, Image as ImageIcon, Loader2, X
+  Upload, Image as ImageIcon, Loader2, X, Infinity as InfinityIcon,
+  Calendar, CalendarPlus, Zap, Award
 } from 'lucide-react';
 
 interface SuperAdminDashboardProps {
@@ -27,9 +28,11 @@ const DEFAULT_LARISSA_COMPANY: Company = {
   createdAt: '2026-06-01T00:00:00.000Z',
   license: {
     status: 'active',
-    planName: 'Plano Pro Anual',
-    monthlyPrice: 199.00,
-    expiresAt: '2027-12-31T23:59:59.000Z',
+    planType: 'lifetime',
+    isLifetime: true,
+    planName: 'Plano Pro Vitalício',
+    monthlyPrice: 0,
+    expiresAt: '2099-12-31T23:59:59.000Z',
     contactPhone: '85992862177',
     notes: 'Empresa Matriz / Principal'
   }
@@ -67,11 +70,13 @@ export default function SuperAdminDashboard({
   const [formAdminName, setFormAdminName] = useState('');
   const [formAdminPassword, setFormAdminPassword] = useState('');
   const [formLicenseStatus, setFormLicenseStatus] = useState<LicenseStatus>('active');
+  const [formPlanType, setFormPlanType] = useState<LicensePlanType>('monthly');
   const [formPlanName, setFormPlanName] = useState('Plano Mensal');
   const [formMonthlyPrice, setFormMonthlyPrice] = useState('149.00');
   const [formContactPhone, setFormContactPhone] = useState('');
   const [formNotes, setFormNotes] = useState('');
   const [formExpiryDays, setFormExpiryDays] = useState('30');
+  const [formCustomExpiryDate, setFormCustomExpiryDate] = useState('');
 
   // Password Change Modal for Companies
   const [passwordModalCompany, setPasswordModalCompany] = useState<Company | null>(null);
@@ -222,11 +227,13 @@ export default function SuperAdminDashboard({
     setFormAdminName('Administrador');
     setFormAdminPassword('123456');
     setFormLicenseStatus('active');
+    setFormPlanType('monthly');
     setFormPlanName('Plano Mensal');
     setFormMonthlyPrice('149.00');
-    setFormContactPhone('');
+    setFormContactPhone('85992862177');
     setFormNotes('');
     setFormExpiryDays('30');
+    setFormCustomExpiryDate('');
     setIsModalOpen(true);
   };
 
@@ -239,10 +246,26 @@ export default function SuperAdminDashboard({
     setFormAdminName(comp.adminName || 'Administrador');
     setFormAdminPassword(comp.adminPassword || '123456');
     setFormLicenseStatus(comp.license?.status || 'active');
-    setFormPlanName(comp.license?.planName || 'Plano Mensal');
-    setFormMonthlyPrice(String(comp.license?.monthlyPrice || '149.00'));
-    setFormContactPhone(comp.license?.contactPhone || '');
+    
+    const isLife = comp.license?.isLifetime || comp.license?.planType === 'lifetime';
+    setFormPlanType(isLife ? 'lifetime' : (comp.license?.planType || (comp.license?.status === 'trial' ? 'trial' : 'monthly')));
+    setFormPlanName(comp.license?.planName || (isLife ? 'Plano Vitalício' : 'Plano Mensal'));
+    setFormMonthlyPrice(String(comp.license?.monthlyPrice ?? (isLife ? '0.00' : '149.00')));
+    setFormContactPhone(comp.license?.contactPhone || '85992862177');
     setFormNotes(comp.license?.notes || '');
+    
+    if (comp.license?.expiresAt && !isLife) {
+      try {
+        const d = new Date(comp.license.expiresAt);
+        setFormCustomExpiryDate(d.toISOString().split('T')[0]);
+      } catch {
+        setFormCustomExpiryDate('');
+      }
+    } else {
+      setFormCustomExpiryDate('');
+    }
+    
+    setFormExpiryDays('30');
     setUploadError(null);
     setIsModalOpen(true);
   };
@@ -279,6 +302,146 @@ export default function SuperAdminDashboard({
     }
   };
 
+  // Helper: Format days remaining & license status info
+  const getLicenseInfo = (license?: CompanyLicense) => {
+    if (!license) {
+      return { label: 'Sem Licença', isLifetime: false, isExpired: false, badgeClass: 'bg-slate-800 text-slate-400 border-slate-700' };
+    }
+    if (license.isLifetime || license.planType === 'lifetime') {
+      return { 
+        label: '♾️ Vitalício (Acesso Permanente)', 
+        isLifetime: true, 
+        isExpired: false, 
+        badgeClass: 'bg-purple-950/80 text-purple-300 border-purple-700/80 font-extrabold shadow-sm' 
+      };
+    }
+    if (!license.expiresAt) {
+      return { 
+        label: '♾️ Vitalício', 
+        isLifetime: true, 
+        isExpired: false, 
+        badgeClass: 'bg-purple-950/80 text-purple-300 border-purple-700/80' 
+      };
+    }
+
+    const expDate = new Date(license.expiresAt);
+    const now = new Date();
+    const diffMs = expDate.getTime() - now.getTime();
+    const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+
+    const dateStr = expDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+    if (diffDays <= 0) {
+      return { 
+        label: `⚠️ Vencido em ${dateStr}`, 
+        isLifetime: false, 
+        isExpired: true, 
+        diffDays,
+        dateStr,
+        badgeClass: 'bg-rose-950 text-rose-300 border-rose-800' 
+      };
+    }
+
+    if (diffDays <= 5) {
+      return { 
+        label: `⏳ Vence em ${diffDays} dia(s) (${dateStr})`, 
+        isLifetime: false, 
+        isExpired: false, 
+        diffDays,
+        dateStr,
+        badgeClass: 'bg-amber-950 text-amber-300 border-amber-800' 
+      };
+    }
+
+    return { 
+      label: `📅 Vence em ${dateStr} (${diffDays} dias)`, 
+      isLifetime: false, 
+      isExpired: false, 
+      diffDays,
+      dateStr,
+      badgeClass: 'bg-emerald-950/80 text-emerald-300 border-emerald-800' 
+    };
+  };
+
+  // Quick Action: Add +30 Days Renewal to Company
+  const handleAdd30Days = async (comp: Company) => {
+    const isLife = comp.license?.isLifetime || comp.license?.planType === 'lifetime';
+    
+    // Calculate base date (from current expiration if future, or today if past)
+    let baseDate = new Date();
+    if (comp.license?.expiresAt && !isLife) {
+      const currentExp = new Date(comp.license.expiresAt);
+      if (currentExp > new Date()) {
+        baseDate = currentExp;
+      }
+    }
+
+    baseDate.setDate(baseDate.getDate() + 30);
+    const newExpiresAt = baseDate.toISOString();
+
+    const updatedLicense: CompanyLicense = {
+      ...(comp.license || { status: 'active' }),
+      status: 'active',
+      isLifetime: false,
+      planType: 'monthly',
+      planName: comp.license?.planName || 'Plano Mensal',
+      expiresAt: newExpiresAt,
+      lastPaymentDate: new Date().toISOString()
+    };
+
+    try {
+      await setDoc(doc(db, 'companies', comp.id), sanitizeFirestoreData({
+        license: updatedLicense
+      }), { merge: true });
+
+      setCompanies(prev => prev.map(c => c.id === comp.id ? { ...c, license: updatedLicense } : c));
+      alert(`✅ +30 Dias adicionados com sucesso para ${comp.name}!\nNova validade: ${baseDate.toLocaleDateString('pt-BR')}`);
+    } catch (err) {
+      console.error("Erro ao adicionar dias:", err);
+      alert("Erro ao salvar: " + (err instanceof Error ? err.message : String(err)));
+    }
+  };
+
+  // Quick Action: Toggle between Lifetime and Monthly
+  const handleToggleLifetime = async (comp: Company) => {
+    const currentlyLifetime = Boolean(comp.license?.isLifetime || comp.license?.planType === 'lifetime');
+    const willBeLifetime = !currentlyLifetime;
+
+    let newExpiresAt: string | undefined = undefined;
+    if (willBeLifetime) {
+      newExpiresAt = '2099-12-31T23:59:59.000Z';
+    } else {
+      const d = new Date();
+      d.setDate(d.getDate() + 30);
+      newExpiresAt = d.toISOString();
+    }
+
+    const updatedLicense: CompanyLicense = {
+      ...(comp.license || { status: 'active' }),
+      status: 'active',
+      isLifetime: willBeLifetime,
+      planType: willBeLifetime ? 'lifetime' : 'monthly',
+      planName: willBeLifetime ? 'Plano Vitalício' : 'Plano Mensal',
+      expiresAt: newExpiresAt,
+      lastPaymentDate: new Date().toISOString()
+    };
+
+    try {
+      await setDoc(doc(db, 'companies', comp.id), sanitizeFirestoreData({
+        license: updatedLicense
+      }), { merge: true });
+
+      setCompanies(prev => prev.map(c => c.id === comp.id ? { ...c, license: updatedLicense } : c));
+      alert(willBeLifetime 
+        ? `🌟 Licença de ${comp.name} alterada para VITALÍCIA! Acesso permanente garantido.` 
+        : `📅 Licença de ${comp.name} alterada para MENSAL (+30 dias de validade).`
+      );
+    } catch (err) {
+      console.error("Erro ao alterar tipo de licença:", err);
+      alert("Erro ao salvar: " + (err instanceof Error ? err.message : String(err)));
+    }
+  };
+
   // Save / Update Company
   const handleSaveCompany = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -287,9 +450,22 @@ export default function SuperAdminDashboard({
     const rawSlug = formSlug.trim() || formName.trim().toLowerCase().replace(/[^a-z0-9]/g, '-');
     const companyId = editingCompany ? editingCompany.id : (rawSlug === 'atendepro_default' ? 'atendepro_default' : `company_${rawSlug}`);
 
+    const isLifetime = formPlanType === 'lifetime';
+
     // Calculate expiry date
-    let expiresAt = editingCompany?.license?.expiresAt;
-    if (!expiresAt || formExpiryDays) {
+    let expiresAt: string | undefined = undefined;
+    if (isLifetime) {
+      expiresAt = '2099-12-31T23:59:59.000Z';
+    } else if (formCustomExpiryDate) {
+      try {
+        const d = new Date(`${formCustomExpiryDate}T23:59:59.000Z`);
+        expiresAt = d.toISOString();
+      } catch {
+        const expDate = new Date();
+        expDate.setDate(expDate.getDate() + parseInt(formExpiryDays || '30', 10));
+        expiresAt = expDate.toISOString();
+      }
+    } else {
       const expDate = new Date();
       expDate.setDate(expDate.getDate() + parseInt(formExpiryDays || '30', 10));
       expiresAt = expDate.toISOString();
@@ -305,7 +481,9 @@ export default function SuperAdminDashboard({
       createdAt: editingCompany?.createdAt || new Date().toISOString(),
       license: {
         status: formLicenseStatus,
-        planName: formPlanName.trim(),
+        planType: formPlanType,
+        isLifetime: isLifetime,
+        planName: formPlanName.trim() || (isLifetime ? 'Plano Vitalício' : 'Plano Mensal'),
         monthlyPrice: parseFloat(formMonthlyPrice) || 0,
         expiresAt,
         contactPhone: formContactPhone.trim(),
@@ -445,6 +623,8 @@ export default function SuperAdminDashboard({
   // Statistics calculation
   const totalCompanies = companies.length;
   const activeCompanies = companies.filter(c => (c.license?.status || 'active') === 'active').length;
+  const lifetimeCompanies = companies.filter(c => c.license?.isLifetime || c.license?.planType === 'lifetime').length;
+  const monthlyCompanies = companies.filter(c => !c.license?.isLifetime && c.license?.planType !== 'lifetime' && c.license?.status !== 'trial').length;
   const trialCompanies = companies.filter(c => c.license?.status === 'trial').length;
   const blockedCompanies = companies.filter(c => c.license?.status === 'blocked').length;
   const estimatedMRR = companies.reduce((acc, curr) => {
@@ -461,9 +641,16 @@ export default function SuperAdminDashboard({
                           (c.adminName || '').toLowerCase().includes(searchTerm.toLowerCase());
     
     const status = c.license?.status || 'active';
-    const matchesStatus = filterStatus === 'all' || status === filterStatus;
+    const isLife = c.license?.isLifetime || c.license?.planType === 'lifetime';
 
-    return matchesSearch && matchesStatus;
+    if (filterStatus === 'all') return matchesSearch;
+    if (filterStatus === 'lifetime') return matchesSearch && isLife;
+    if (filterStatus === 'monthly') return matchesSearch && !isLife && status !== 'trial';
+    if (filterStatus === 'trial') return matchesSearch && status === 'trial';
+    if (filterStatus === 'blocked') return matchesSearch && status === 'blocked';
+    if (filterStatus === 'active') return matchesSearch && status === 'active';
+
+    return matchesSearch && (status === filterStatus);
   });
 
   // -------------------------------------------------------------
@@ -603,53 +790,64 @@ export default function SuperAdminDashboard({
         </div>
 
         {/* KPI Financial & Operations Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3.5">
           
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4.5 shadow-lg">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-lg">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Total Empresas</span>
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Total</span>
               <Building2 className="w-4 h-4 text-indigo-400" />
             </div>
-            <p className="text-2xl font-extrabold text-white mt-2">{totalCompanies}</p>
-            <p className="text-[11px] text-slate-400 mt-0.5">Cadastradas no sistema</p>
+            <p className="text-xl font-extrabold text-white mt-1.5">{totalCompanies}</p>
+            <p className="text-[10px] text-slate-400 mt-0.5">Empresas no sistema</p>
           </div>
 
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4.5 shadow-lg">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-lg">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">Licenças Ativas</span>
+              <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider">Ativas</span>
               <CheckCircle2 className="w-4 h-4 text-emerald-400" />
             </div>
-            <p className="text-2xl font-extrabold text-emerald-400 mt-2">{activeCompanies}</p>
-            <p className="text-[11px] text-slate-400 mt-0.5">Acesso total liberado</p>
+            <p className="text-xl font-extrabold text-emerald-400 mt-1.5">{activeCompanies}</p>
+            <p className="text-[10px] text-slate-400 mt-0.5">Acesso liberado</p>
           </div>
 
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4.5 shadow-lg">
+          <div className="bg-slate-900 border border-purple-900/50 bg-gradient-to-b from-purple-950/20 to-slate-900 rounded-2xl p-4 shadow-lg">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-amber-400 uppercase tracking-wider">Em Teste (Trial)</span>
-              <Clock className="w-4 h-4 text-amber-400" />
+              <span className="text-[11px] font-bold text-purple-300 uppercase tracking-wider flex items-center gap-1">
+                <InfinityIcon className="w-3.5 h-3.5 text-purple-400" /> Vitalícias
+              </span>
             </div>
-            <p className="text-2xl font-extrabold text-amber-400 mt-2">{trialCompanies}</p>
-            <p className="text-[11px] text-slate-400 mt-0.5">Demonstração gratuita</p>
+            <p className="text-xl font-extrabold text-purple-300 mt-1.5">{lifetimeCompanies}</p>
+            <p className="text-[10px] text-purple-400/80 mt-0.5">Sem expiração</p>
           </div>
 
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4.5 shadow-lg">
+          <div className="bg-slate-900 border border-indigo-900/40 rounded-2xl p-4 shadow-lg">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-rose-400 uppercase tracking-wider">Bloqueadas</span>
+              <span className="text-[11px] font-bold text-indigo-300 uppercase tracking-wider flex items-center gap-1">
+                <Calendar className="w-3.5 h-3.5 text-indigo-400" /> Mensais
+              </span>
+            </div>
+            <p className="text-xl font-extrabold text-indigo-300 mt-1.5">{monthlyCompanies}</p>
+            <p className="text-[10px] text-slate-400 mt-0.5">Renovação recorrente</p>
+          </div>
+
+          <div className="bg-slate-900 border border-rose-900/40 rounded-2xl p-4 shadow-lg">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-rose-400 uppercase tracking-wider">Bloqueadas</span>
               <Lock className="w-4 h-4 text-rose-400" />
             </div>
-            <p className="text-2xl font-extrabold text-rose-400 mt-2">{blockedCompanies}</p>
-            <p className="text-[11px] text-slate-400 mt-0.5">Inadimplentes ou suspensas</p>
+            <p className="text-xl font-extrabold text-rose-400 mt-1.5">{blockedCompanies}</p>
+            <p className="text-[10px] text-slate-400 mt-0.5">Inadimplentes</p>
           </div>
 
-          <div className="bg-gradient-to-br from-indigo-900/60 to-slate-900 border border-indigo-800/50 rounded-2xl p-4.5 shadow-lg">
+          <div className="bg-gradient-to-br from-indigo-900/60 to-slate-900 border border-indigo-800/50 rounded-2xl p-4 shadow-lg col-span-2 sm:col-span-1">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-indigo-300 uppercase tracking-wider">MRR Estimado</span>
+              <span className="text-[11px] font-bold text-indigo-300 uppercase tracking-wider">MRR Mensal</span>
               <DollarSign className="w-4 h-4 text-indigo-300" />
             </div>
-            <p className="text-2xl font-extrabold text-white mt-2">
+            <p className="text-lg font-extrabold text-white mt-1.5">
               R$ {estimatedMRR.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </p>
-            <p className="text-[11px] text-indigo-200/70 mt-0.5">Faturamento mensal recorrente</p>
+            <p className="text-[10px] text-indigo-200/70 mt-0.5">Faturamento recorrente</p>
           </div>
 
         </div>
@@ -673,6 +871,8 @@ export default function SuperAdminDashboard({
             {[
               { id: 'all', label: 'Todas' },
               { id: 'active', label: '🟢 Ativas' },
+              { id: 'lifetime', label: '♾️ Vitalícias' },
+              { id: 'monthly', label: '📅 Mensais' },
               { id: 'trial', label: '🟡 Trial' },
               { id: 'blocked', label: '🔴 Bloqueadas' }
             ].map(tab => (
@@ -705,7 +905,9 @@ export default function SuperAdminDashboard({
               const isBlocked = status === 'blocked';
               const isTrial = status === 'trial';
               const isActive = status === 'active';
+              const isLife = Boolean(comp.license?.isLifetime || comp.license?.planType === 'lifetime');
               const slug = comp.slug || comp.id;
+              const licenseInfo = getLicenseInfo(comp.license);
 
               const clientUrl = `${baseUrl}/?empresa=${slug}&view=client`;
               const loginUrl = `${baseUrl}/?empresa=${slug}&view=login`;
@@ -716,6 +918,8 @@ export default function SuperAdminDashboard({
                   className={`bg-slate-900 border rounded-2xl p-5 transition-all shadow-lg flex flex-col lg:flex-row justify-between items-start lg:items-center gap-5 ${
                     isBlocked 
                       ? 'border-rose-900/60 bg-slate-900/90' 
+                      : isLife 
+                      ? 'border-purple-800/40 bg-gradient-to-r from-slate-900 via-slate-900 to-purple-950/10'
                       : isTrial 
                       ? 'border-amber-800/40' 
                       : 'border-slate-800 hover:border-slate-700'
@@ -732,7 +936,7 @@ export default function SuperAdminDashboard({
                       />
                     </div>
 
-                    <div className="space-y-1">
+                    <div className="space-y-1.5">
                       <div className="flex flex-wrap items-center gap-2">
                         <h3 className="text-lg font-bold text-white tracking-tight">
                           {comp.name}
@@ -746,7 +950,12 @@ export default function SuperAdminDashboard({
                             ? 'bg-amber-950 text-amber-300 border-amber-800' 
                             : 'bg-emerald-950 text-emerald-300 border-emerald-800'
                         }`}>
-                          {isBlocked ? '🔴 Bloqueada / Inadimplente' : isTrial ? '🟡 Demonstração (Trial)' : '🟢 Licença Ativa'}
+                          {isBlocked ? '🔴 Bloqueada' : isTrial ? '🟡 Trial' : '🟢 Ativa'}
+                        </span>
+
+                        {/* Lifetime vs Monthly License Badge */}
+                        <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${licenseInfo.badgeClass}`}>
+                          {licenseInfo.label}
                         </span>
 
                         {comp.id === 'atendepro_default' && (
@@ -758,7 +967,13 @@ export default function SuperAdminDashboard({
 
                       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
                         <span>Dono(a): <strong className="text-slate-200">{comp.adminName || 'Larissa'}</strong></span>
-                        <span>Mensalidade: <strong className="text-emerald-400">R$ {(comp.license?.monthlyPrice || 0).toFixed(2)}/mês</strong></span>
+                        {isLife ? (
+                          <span className="text-purple-300 font-semibold flex items-center gap-1">
+                            <InfinityIcon className="w-3 h-3" /> Licença Vitalícia
+                          </span>
+                        ) : (
+                          <span>Mensalidade: <strong className="text-emerald-400">R$ {(comp.license?.monthlyPrice || 0).toFixed(2)}/mês</strong></span>
+                        )}
                         {comp.license?.contactPhone && (
                           <span className="flex items-center gap-1">
                             <Phone className="w-3 h-3 text-slate-500" />
@@ -779,7 +994,7 @@ export default function SuperAdminDashboard({
                       className="px-3 py-2 bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
                     >
                       {copiedKey === `client_${comp.id}` ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-indigo-400" />}
-                      <span>Link Chat Cliente</span>
+                      <span>Chat Cliente</span>
                     </button>
 
                     {/* Copy Link Login Funcionários */}
@@ -789,7 +1004,33 @@ export default function SuperAdminDashboard({
                       className="px-3 py-2 bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
                     >
                       {copiedKey === `login_${comp.id}` ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-amber-400" />}
-                      <span>Link Login Vendedor</span>
+                      <span>Login Vendedor</span>
+                    </button>
+
+                    {/* Quick Button: +30 Dias (Renovar Mensalidade) */}
+                    {!isLife && (
+                      <button
+                        onClick={() => handleAdd30Days(comp)}
+                        title="Adicionar +30 dias de validade (Renovar Licença Mensal)"
+                        className="px-3 py-2 bg-emerald-600/20 hover:bg-emerald-600 border border-emerald-500/40 text-emerald-300 hover:text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
+                      >
+                        <CalendarPlus className="w-3.5 h-3.5" />
+                        <span>+30 Dias</span>
+                      </button>
+                    )}
+
+                    {/* Quick Button: Toggle Lifetime <-> Monthly */}
+                    <button
+                      onClick={() => handleToggleLifetime(comp)}
+                      title={isLife ? "Mudar plano para Mensal (+30 dias)" : "Tornar licença Vitalícia (Sem Expiração)"}
+                      className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer border ${
+                        isLife 
+                          ? 'bg-purple-950/80 hover:bg-purple-900 border-purple-700/80 text-purple-300' 
+                          : 'bg-slate-800 hover:bg-purple-950 hover:border-purple-700 border-slate-700 text-slate-300 hover:text-purple-300'
+                      }`}
+                    >
+                      <InfinityIcon className="w-3.5 h-3.5" />
+                      <span>{isLife ? 'Vitalício ♾️' : 'Mudar p/ Vitalício'}</span>
                     </button>
 
                     {/* Quick 1-Click Block / Unblock */}
@@ -1039,54 +1280,141 @@ export default function SuperAdminDashboard({
                 </div>
               </div>
 
-              {/* Row 4: Status da Licença e Mensalidade */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">
-                    Status da Licença
-                  </label>
-                  <select
-                    value={formLicenseStatus}
-                    onChange={(e) => setFormLicenseStatus(e.target.value as LicenseStatus)}
-                    className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl py-2.5 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              {/* Row 4: Seleção do Modelo de Licença (Vitalício vs Mensal vs Trial) */}
+              <div className="space-y-3 bg-slate-950/80 border border-slate-800 rounded-2xl p-4">
+                <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block">
+                  Tipo de Licença / Modelo de Cobrança *
+                </label>
+
+                {/* Segmented Selector */}
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFormPlanType('lifetime');
+                      setFormLicenseStatus('active');
+                      setFormExpiryDays('3650');
+                    }}
+                    className={`py-3 px-3 rounded-xl border text-xs font-bold flex flex-col items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                      formPlanType === 'lifetime'
+                        ? 'bg-purple-950 border-purple-500 text-purple-200 shadow-lg shadow-purple-950/50 ring-1 ring-purple-500'
+                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                    }`}
                   >
-                    <option value="active">🟢 Ativa (Liberada)</option>
-                    <option value="trial">🟡 Demonstração (Trial)</option>
-                    <option value="blocked">🔴 Bloqueada (Inadimplente)</option>
-                    <option value="canceled">⚫ Cancelada</option>
-                  </select>
+                    <InfinityIcon className="w-5 h-5 text-purple-400" />
+                    <span>Vitalícia (♾️)</span>
+                    <span className="text-[10px] font-normal text-purple-300/70">Acesso Permanente</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFormPlanType('monthly');
+                      setFormLicenseStatus('active');
+                      setFormExpiryDays('30');
+                    }}
+                    className={`py-3 px-3 rounded-xl border text-xs font-bold flex flex-col items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                      formPlanType === 'monthly'
+                        ? 'bg-indigo-950 border-indigo-500 text-indigo-200 shadow-lg shadow-indigo-950/50 ring-1 ring-indigo-500'
+                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                    }`}
+                  >
+                    <Calendar className="w-5 h-5 text-indigo-400" />
+                    <span>Mensal (📅)</span>
+                    <span className="text-[10px] font-normal text-indigo-300/70">Recorrência / 30 Dias</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFormPlanType('trial');
+                      setFormLicenseStatus('trial');
+                      setFormExpiryDays('7');
+                    }}
+                    className={`py-3 px-3 rounded-xl border text-xs font-bold flex flex-col items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                      formPlanType === 'trial'
+                        ? 'bg-amber-950 border-amber-500 text-amber-200 shadow-lg shadow-amber-950/50 ring-1 ring-amber-500'
+                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                    }`}
+                  >
+                    <Clock className="w-5 h-5 text-amber-400" />
+                    <span>Trial (🟡)</span>
+                    <span className="text-[10px] font-normal text-amber-300/70">Teste 7 ou 15 dias</span>
+                  </button>
                 </div>
 
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">
-                    Mensalidade (R$)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={formMonthlyPrice}
-                    onChange={(e) => setFormMonthlyPrice(e.target.value)}
-                    placeholder="149.00"
-                    className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl py-2.5 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                </div>
+                {/* Lifetime Mode Banner */}
+                {formPlanType === 'lifetime' && (
+                  <div className="p-3 bg-purple-950/40 border border-purple-800/60 rounded-xl text-purple-200 text-xs flex items-center gap-2.5">
+                    <Sparkles className="w-5 h-5 text-purple-400 shrink-0" />
+                    <p className="leading-snug">
+                      <strong>Plano Vitalício Ativado:</strong> O cliente terá acesso permanente ao sistema sem nenhuma data de vencimento. Caso queira suspender temporariamente por qualquer motivo, use o botão Bloquear.
+                    </p>
+                  </div>
+                )}
 
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">
-                    Validade (Dias)
-                  </label>
-                  <select
-                    value={formExpiryDays}
-                    onChange={(e) => setFormExpiryDays(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl py-2.5 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  >
-                    <option value="7">7 dias (Trial)</option>
-                    <option value="15">15 dias (Trial)</option>
-                    <option value="30">30 dias (Mensal)</option>
-                    <option value="90">90 dias (Trimestral)</option>
-                    <option value="365">365 dias (Anual)</option>
-                    <option value="3650">Vitalício (10 anos)</option>
-                  </select>
+                {/* Financial and Expiry Settings Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                      Status da Conta
+                    </label>
+                    <select
+                      value={formLicenseStatus}
+                      onChange={(e) => setFormLicenseStatus(e.target.value as LicenseStatus)}
+                      className="w-full bg-slate-900 border border-slate-800 text-white rounded-xl py-2 px-3 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    >
+                      <option value="active">🟢 Ativa (Liberada)</option>
+                      <option value="trial">🟡 Trial (Teste)</option>
+                      <option value="blocked">🔴 Bloqueada</option>
+                      <option value="canceled">⚫ Cancelada</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                      {formPlanType === 'lifetime' ? 'Valor Venda (R$)' : 'Mensalidade (R$)'}
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={formMonthlyPrice}
+                      onChange={(e) => setFormMonthlyPrice(e.target.value)}
+                      placeholder={formPlanType === 'lifetime' ? '997.00' : '149.00'}
+                      className="w-full bg-slate-900 border border-slate-800 text-white rounded-xl py-2 px-3 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+
+                  {formPlanType !== 'lifetime' ? (
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                        Validade / Dias
+                      </label>
+                      <select
+                        value={formExpiryDays}
+                        onChange={(e) => setFormExpiryDays(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-800 text-white rounded-xl py-2 px-3 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      >
+                        <option value="7">7 dias (Trial)</option>
+                        <option value="15">15 dias (Trial)</option>
+                        <option value="30">30 dias (Mensal)</option>
+                        <option value="60">60 dias (Bimestral)</option>
+                        <option value="90">90 dias (Trimestral)</option>
+                        <option value="180">180 dias (Semestral)</option>
+                        <option value="365">365 dias (Anual)</option>
+                      </select>
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                        Expiração
+                      </label>
+                      <div className="w-full bg-slate-900/60 border border-purple-900/40 text-purple-300 rounded-xl py-2 px-3 text-xs font-semibold flex items-center justify-center gap-1">
+                        <InfinityIcon className="w-3.5 h-3.5" />
+                        <span>Ilimitado</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 

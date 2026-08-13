@@ -6,8 +6,12 @@ export enum ChatStatus {
 
 export type LicenseStatus = 'active' | 'trial' | 'blocked' | 'expired' | 'canceled';
 
+export type LicensePlanType = 'lifetime' | 'monthly' | 'trial' | 'annual';
+
 export interface CompanyLicense {
   status: LicenseStatus;
+  planType?: LicensePlanType;
+  isLifetime?: boolean;
   planName?: string;
   expiresAt?: string;
   monthlyPrice?: number;

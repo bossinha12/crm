@@ -231,8 +231,16 @@ export default function App() {
     );
   }
 
-  // 2. License Guard: If Company license is blocked or suspended, display Blocked Screen
-  const isLicenseBlocked = company && (company.license?.status === 'blocked' || company.license?.status === 'suspended' || company.license?.status === 'expired');
+  // 2. License Guard: If Company license is blocked, suspended, canceled or date expired (unless Lifetime)
+  const isLifetime = company?.license?.isLifetime || company?.license?.planType === 'lifetime';
+  const isDateExpired = !isLifetime && Boolean(company?.license?.expiresAt && new Date(company.license.expiresAt) < new Date());
+  const isLicenseBlocked = Boolean(company && (
+    company.license?.status === 'blocked' || 
+    company.license?.status === 'suspended' || 
+    company.license?.status === 'expired' || 
+    company.license?.status === 'canceled' ||
+    isDateExpired
+  ));
 
   if (isLicenseBlocked) {
     return (
