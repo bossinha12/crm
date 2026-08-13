@@ -1,12 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { collection, onSnapshot, doc, setDoc, deleteDoc, getDocs } from 'firebase/firestore';
 import { db, sanitizeFirestoreData } from '../lib/firebase';
+import { uploadToImgBB } from '../lib/imgbb';
 import { Company, CompanyLicense, LicenseStatus } from '../types';
 import { 
   Building2, Plus, ShieldCheck, ShieldAlert, Lock, Unlock, 
   Copy, Check, ExternalLink, Key, Edit3, Trash2, Search, 
   DollarSign, Clock, Users, ArrowLeft, RefreshCw, Sparkles, 
-  Eye, CheckCircle2, AlertTriangle, Phone, Globe, Layers
+  Eye, CheckCircle2, AlertTriangle, Phone, Globe, Layers,
+  Upload, Image as ImageIcon, Loader2, X
 } from 'lucide-react';
 
 interface SuperAdminDashboardProps {
@@ -28,7 +30,7 @@ const DEFAULT_LARISSA_COMPANY: Company = {
     planName: 'Plano Pro Anual',
     monthlyPrice: 199.00,
     expiresAt: '2027-12-31T23:59:59.000Z',
-    contactPhone: '85987654321',
+    contactPhone: '85992862177',
     notes: 'Empresa Matriz / Principal'
   }
 };
@@ -59,6 +61,9 @@ export default function SuperAdminDashboard({
   const [formName, setFormName] = useState('');
   const [formSlug, setFormSlug] = useState('');
   const [formLogoUrl, setFormLogoUrl] = useState('');
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [formAdminName, setFormAdminName] = useState('');
   const [formAdminPassword, setFormAdminPassword] = useState('');
   const [formLicenseStatus, setFormLicenseStatus] = useState<LicenseStatus>('active');
@@ -234,7 +239,40 @@ export default function SuperAdminDashboard({
     setFormMonthlyPrice(String(comp.license?.monthlyPrice || '149.00'));
     setFormContactPhone(comp.license?.contactPhone || '');
     setFormNotes(comp.license?.notes || '');
+    setUploadError(null);
     setIsModalOpen(true);
+  };
+
+  // Direct Upload to ImgBB via API Key
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setUploadError('Por favor selecione um arquivo de imagem válido (PNG, JPG, WEBP).');
+      return;
+    }
+
+    if (file.size > 15 * 1024 * 1024) {
+      setUploadError('A imagem deve ter no máximo 15MB.');
+      return;
+    }
+
+    setIsUploadingLogo(true);
+    setUploadError(null);
+
+    try {
+      const uploadedUrl = await uploadToImgBB(file);
+      setFormLogoUrl(uploadedUrl);
+    } catch (err) {
+      console.error('Erro ao fazer upload para o ImgBB:', err);
+      setUploadError(err instanceof Error ? err.message : 'Erro ao enviar imagem ao ImgBB.');
+    } finally {
+      setIsUploadingLogo(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
   };
 
   // Save / Update Company
@@ -861,28 +899,93 @@ export default function SuperAdminDashboard({
                 </div>
               </div>
 
-              {/* Row 2: Logomarca (URL) com Preview */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">
-                  URL da Logomarca (Imagem)
-                </label>
-                <div className="flex items-center gap-3">
-                  <input
-                    type="url"
-                    value={formLogoUrl}
-                    onChange={(e) => setFormLogoUrl(e.target.value)}
-                    placeholder="https://... (deixe vazio para usar logo padrão)"
-                    className="grow bg-slate-950 border border-slate-800 text-white rounded-xl py-2.5 px-3.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                  <div className="w-11 h-11 rounded-xl bg-slate-950 border border-slate-700 p-0.5 overflow-hidden shrink-0 flex items-center justify-center">
+              {/* Row 2: Logomarca da Empresa com Upload Direto via ImgBB */}
+              <div className="space-y-2 bg-slate-950/60 border border-slate-800/80 rounded-2xl p-4">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <ImageIcon className="w-3.5 h-3.5 text-indigo-400" />
+                    Logomarca da Empresa (Upload Direto)
+                  </label>
+                  <span className="text-[10px] font-semibold text-emerald-400 bg-emerald-950/80 border border-emerald-800/60 px-2 py-0.5 rounded-full">
+                    API ImgBB Integrada
+                  </span>
+                </div>
+
+                {/* Hidden File Input for Direct Upload */}
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleLogoUpload}
+                  accept="image/png, image/jpeg, image/jpg, image/webp, image/gif"
+                  className="hidden"
+                />
+
+                <div className="flex flex-col sm:flex-row items-center gap-3.5">
+                  {/* Thumbnail / Preview Box */}
+                  <div className="relative group w-16 h-16 rounded-2xl bg-slate-900 border border-slate-700/80 p-1 overflow-hidden shrink-0 flex items-center justify-center shadow-md">
                     <img 
                       src={formLogoUrl || 'https://i.postimg.cc/8CdttXNK/Whats-App-Image-2026-06-10-at-14-30-14.jpg'} 
                       referrerPolicy="no-referrer" 
-                      alt="Preview" 
-                      className="w-full h-full object-cover rounded-lg"
+                      alt="Logo Empresa" 
+                      className="w-full h-full object-cover rounded-xl"
                     />
+                    {formLogoUrl && (
+                      <button
+                        type="button"
+                        onClick={() => setFormLogoUrl('')}
+                        title="Remover foto"
+                        className="absolute inset-0 bg-black/70 opacity-0 group-hover:opacity-100 flex items-center justify-center text-rose-400 transition-opacity cursor-pointer"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Upload Actions & Controls */}
+                  <div className="grow w-full space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={isUploadingLogo}
+                        onClick={() => fileInputRef.current?.click()}
+                        className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-900/60 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-2 cursor-pointer disabled:cursor-not-allowed"
+                      >
+                        {isUploadingLogo ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin text-white" />
+                            <span>Enviando para o ImgBB...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Upload className="w-4 h-4 text-indigo-200" />
+                            <span>Selecionar Foto da Galeria / PC</span>
+                          </>
+                        )}
+                      </button>
+
+                      {formLogoUrl && (
+                        <button
+                          type="button"
+                          onClick={() => setFormLogoUrl('')}
+                          className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-all cursor-pointer"
+                        >
+                          Usar Logo Padrão
+                        </button>
+                      )}
+                    </div>
+
+                    <p className="text-[11px] text-slate-400 leading-snug">
+                      Envie arquivos PNG, JPG ou WEBP. A foto é salva e hospedada instantaneamente sem precisar gerar links manualmente.
+                    </p>
                   </div>
                 </div>
+
+                {uploadError && (
+                  <div className="p-2.5 bg-rose-950/70 border border-rose-800 text-rose-300 text-xs rounded-xl flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 shrink-0" />
+                    <span>{uploadError}</span>
+                  </div>
+                )}
               </div>
 
               {/* Row 3: Dono(a) e Senha Master */}
@@ -976,7 +1079,7 @@ export default function SuperAdminDashboard({
                   type="text"
                   value={formContactPhone}
                   onChange={(e) => setFormContactPhone(e.target.value)}
-                  placeholder="Ex: (85) 98765-4321"
+                  placeholder="Ex: (85) 99286-2177"
                   className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl py-2.5 px-3.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 />
               </div>

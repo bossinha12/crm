@@ -14,8 +14,10 @@ export default function BlockedLicenseScreen({
   onGoBackHome
 }: BlockedLicenseScreenProps) {
   const companyLogo = company.logoUrl || 'https://i.postimg.cc/8CdttXNK/Whats-App-Image-2026-06-10-at-14-30-14.jpg';
-  const supportPhone = company.license?.contactPhone || '85999999999';
-  const whatsappUrl = `https://wa.me/${supportPhone.replace(/\D/g, '')}?text=${encodeURIComponent(`Olá, gostaria de regularizar a licença de uso do sistema para a empresa ${company.name}.`)}`;
+  const supportPhone = company.license?.contactPhone || '85992862177';
+  const cleanPhone = supportPhone.replace(/\D/g, '');
+  const finalPhone = cleanPhone.startsWith('55') ? cleanPhone : `55${cleanPhone}`;
+  const whatsappUrl = `https://wa.me/${finalPhone}?text=${encodeURIComponent(`Olá, gostaria de regularizar a licença de uso do sistema para a empresa ${company.name}.`)}`;
 
   return (
     <main className="min-h-screen bg-slate-900 flex flex-col justify-center items-center p-4 font-sans text-slate-100 relative overflow-hidden">
