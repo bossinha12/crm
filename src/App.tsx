@@ -74,6 +74,7 @@ export default function App() {
 
       if (isSuper) {
         setIsSuperAdminView(true);
+        document.title = 'Painel de Licenças | Gestão de Empresas';
       } else if (viewParam === 'login' || hash.includes('login')) {
         setIsSuperAdminView(false);
         setCurrentView('login');
@@ -95,6 +96,15 @@ export default function App() {
       window.removeEventListener('hashchange', handleUrlChange);
     };
   }, [companyId]);
+
+  // Dynamically update document title based on active view and company
+  useEffect(() => {
+    if (isSuperAdminView) {
+      document.title = 'Painel de Licenças | Gestão de Empresas';
+    } else if (company?.name) {
+      document.title = `${company.name} - Atendimento Online`;
+    }
+  }, [isSuperAdminView, company?.name]);
 
   // Initialize Firebase Auth & Real-Time Company Document Listener
   useEffect(() => {

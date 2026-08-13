@@ -84,8 +84,10 @@ export default function SuperAdminDashboard({
   // Copied feedback
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
-  // Synchronize Cloud Super Admin PIN
+  // Synchronize Cloud Super Admin PIN & Update Document Title
   useEffect(() => {
+    document.title = 'Painel de Licenças | Gestão de Empresas';
+
     const unsub = onSnapshot(doc(db, 'system', 'superadmin_config'), (snap) => {
       if (snap.exists()) {
         const data = snap.data();
@@ -418,10 +420,10 @@ export default function SuperAdminDashboard({
               <Layers className="w-7 h-7" />
             </div>
             <h1 className="text-2xl font-bold text-white tracking-tight">
-              SaaS Control Center
+              Painel de Licenças & Lojas
             </h1>
             <p className="text-xs text-slate-400">
-              Painel do Proprietário • Gestão de Licenças, Clientes e White-label
+              Controle Mestre • Gestão de Licenças, Clientes e Multi-Empresas
             </p>
           </div>
 
