@@ -86,6 +86,10 @@ export default function SuperAdminDashboard({
     return localStorage.getItem('crm_superadmin_pin') || '13259898';
   });
 
+  // Delete Confirmation Modal State
+  const [companyToDelete, setCompanyToDelete] = useState<Company | null>(null);
+  const [isDeletingCompany, setIsDeletingCompany] = useState(false);
+
   // Copied feedback
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
@@ -393,23 +397,41 @@ export default function SuperAdminDashboard({
     }
   };
 
-  // Delete Company (Protection for default company)
-  const handleDeleteCompany = async (comp: Company) => {
-    if (comp.id === 'atendepro_default') {
-      alert("A empresa principal (Larissa Móveis) não pode ser excluída.");
-      return;
-    }
+  // Prompt Delete Confirmation Modal for any Company
+  const promptDeleteCompany = (comp: Company) => {
+    setCompanyToDelete(comp);
+  };
 
-    if (!confirm(`Tem certeza que deseja excluir permanentemente a empresa "${comp.name}" e todas as suas licenças? Esta ação não pode ser desfeita.`)) {
-      return;
-    }
+  // Execute Permanent Company Deletion in Firestore & Local State
+  const executeDeleteCompany = async () => {
+    if (!companyToDelete) return;
 
+    setIsDeletingCompany(true);
     try {
-      await deleteDoc(doc(db, 'companies', comp.id));
-      setCompanies(prev => prev.filter(c => c.id !== comp.id));
+      // 1. Delete document from Firestore
+      await deleteDoc(doc(db, 'companies', companyToDelete.id));
+
+      // 2. Update local state
+      setCompanies(prev => prev.filter(c => c.id !== companyToDelete.id));
+
+      // 3. Update localStorage fallback
+      const localListStr = localStorage.getItem('crm_local_companies');
+      if (localListStr) {
+        try {
+          const parsed = JSON.parse(localListStr) as Company[];
+          const filtered = parsed.filter(c => c.id !== companyToDelete.id);
+          localStorage.setItem('crm_local_companies', JSON.stringify(filtered));
+        } catch {
+          // ignore
+        }
+      }
+
+      setCompanyToDelete(null);
     } catch (err) {
       console.error("Erro ao excluir empresa:", err);
-      alert("Erro ao excluir: " + (err instanceof Error ? err.message : String(err)));
+      alert("Erro ao excluir empresa: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setIsDeletingCompany(false);
     }
   };
 
@@ -814,16 +836,14 @@ export default function SuperAdminDashboard({
                       <Eye className="w-4 h-4" />
                     </button>
 
-                    {/* Delete Company (Protected for default) */}
-                    {comp.id !== 'atendepro_default' && (
-                      <button
-                        onClick={() => handleDeleteCompany(comp)}
-                        title="Excluir Empresa"
-                        className="p-2 bg-slate-950 hover:bg-rose-950 text-slate-500 hover:text-rose-400 rounded-xl transition-all border border-slate-800 hover:border-rose-800 cursor-pointer"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    )}
+                    {/* Delete Company Button */}
+                    <button
+                      onClick={() => promptDeleteCompany(comp)}
+                      title="Excluir Empresa / Cancelar Licença"
+                      className="p-2 bg-rose-950/40 hover:bg-rose-600 text-rose-400 hover:text-white rounded-xl transition-all border border-rose-900/50 hover:border-rose-600 cursor-pointer shadow-sm"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
 
                   </div>
                 </div>
@@ -1229,6 +1249,78 @@ export default function SuperAdminDashboard({
                 </div>
               </form>
             )}
+
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* MODAL: Confirmação de Exclusão de Empresa / Licença */}
+      {/* ------------------------------------------------------------- */}
+      {companyToDelete && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-rose-900/60 rounded-3xl max-w-md w-full p-6 sm:p-7 space-y-5 shadow-2xl animate-in fade-in zoom-in duration-200">
+            
+            <div className="flex items-center gap-3.5">
+              <div className="w-12 h-12 rounded-2xl bg-rose-600/20 border border-rose-500/40 text-rose-400 flex items-center justify-center shrink-0">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-white">
+                  Excluir Empresa / Cliente
+                </h3>
+                <p className="text-xs text-rose-400 font-medium">
+                  Ação permanente e irreversível
+                </p>
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-950/80 rounded-2xl border border-slate-800 space-y-2">
+              <div className="flex items-center gap-3">
+                <img 
+                  src={companyToDelete.logoUrl || 'https://i.postimg.cc/8CdttXNK/Whats-App-Image-2026-06-10-at-14-30-14.jpg'} 
+                  referrerPolicy="no-referrer"
+                  alt={companyToDelete.name}
+                  className="w-10 h-10 rounded-xl object-cover border border-slate-700 shrink-0" 
+                />
+                <div>
+                  <h4 className="text-sm font-bold text-white">{companyToDelete.name}</h4>
+                  <p className="text-xs text-slate-400 font-mono">slug: {companyToDelete.slug || companyToDelete.id}</p>
+                </div>
+              </div>
+              <p className="text-xs text-slate-300 pt-2 border-t border-slate-800/80 leading-relaxed">
+                Tem certeza que deseja excluir esta empresa? Todos os links de atendimento e credenciais desta loja serão removidos do sistema.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                disabled={isDeletingCompany}
+                onClick={() => setCompanyToDelete(null)}
+                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all cursor-pointer disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingCompany}
+                onClick={executeDeleteCompany}
+                className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-rose-950 flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {isDeletingCompany ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    <span>Excluindo...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    <span>Sim, Excluir Empresa</span>
+                  </>
+                )}
+              </button>
+            </div>
 
           </div>
         </div>
