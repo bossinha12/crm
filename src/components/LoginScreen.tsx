@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { collection, getDocs, doc, setDoc, onSnapshot } from 'firebase/firestore';
 import { db, sanitizeFirestoreData } from '../lib/firebase';
-import { User } from '../types';
+import { User, Company } from '../types';
 import { LogIn, Key, Compass, ShieldAlert, Sparkles } from 'lucide-react';
 
 interface LoginScreenProps {
   companyId: string;
+  company?: Company | null;
   onLoginSuccess: (user: User) => void;
 }
 
@@ -17,27 +18,36 @@ const sanitizeInput = (text: string) => {
     .replace(/[\u0300-\u036f]/g, ""); // removes accents and trim
 };
 
-export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenProps) {
+export default function LoginScreen({ companyId, company, onLoginSuccess }: LoginScreenProps) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [availableSellers, setAvailableSellers] = useState<User[]>([]);
 
+  const companyName = company?.name || 'Larissa Móveis';
+  const companyLogo = company?.logoUrl || 'https://i.postimg.cc/8CdttXNK/Whats-App-Image-2026-06-10-at-14-30-14.jpg';
+  const configuredAdminName = company?.adminName || 'Larissa';
+  const configuredAdminPass = company?.adminPassword || '13259898';
+
   // Listen to registered employees in real-time to make login select options or quick selections available instantly
   useEffect(() => {
-    const larissaUser: User = {
-      id: 'admin-larissa',
-      name: 'Larissa',
-      password: '13259898',
+    const adminUserId = `admin-${sanitizeInput(configuredAdminName)}`;
+    const adminUser: User = {
+      id: adminUserId,
+      name: configuredAdminName,
+      password: configuredAdminPass,
       role: 'admin',
       createdAt: new Date().toISOString()
     };
 
-    // Silently synchronize Larissa to Firestore
+    // Silently synchronize Admin to Firestore
     const syncAdmin = async () => {
       try {
-        await setDoc(doc(db, 'companies', companyId, 'users', 'admin-larissa'), larissaUser);
+        await setDoc(doc(db, 'companies', companyId, 'users', adminUserId), sanitizeFirestoreData(adminUser), { merge: true });
+        if (companyId === 'atendepro_default') {
+          await setDoc(doc(db, 'companies', companyId, 'users', 'admin-larissa'), sanitizeFirestoreData(adminUser), { merge: true });
+        }
       } catch (syncErr) {
         console.warn("Could not sync admin to Firestore:", syncErr);
       }
@@ -52,7 +62,7 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
       });
 
       // Load from local storage fallback
-      const savedLocal = localStorage.getItem('atendepro_local_users');
+      const savedLocal = localStorage.getItem(`atendepro_local_users_${companyId}`) || localStorage.getItem('atendepro_local_users');
       let localUsersList: User[] = [];
       if (savedLocal) {
         try {
@@ -68,20 +78,21 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
       const mergedList = Array.from(userMap.values());
 
       // Save sync back to localStorage
-      localStorage.setItem('atendepro_local_users', JSON.stringify(mergedList));
+      localStorage.setItem(`atendepro_local_users_${companyId}`, JSON.stringify(mergedList));
 
-      // Filter out admin-larissa copies and any 'larissa' duplicate
+      // Filter out admin copies
       let filtered = mergedList.filter(u => 
-        u.name.toLowerCase() !== 'larissa' && 
+        sanitizeInput(u.name) !== sanitizeInput(configuredAdminName) &&
+        u.id !== adminUserId &&
         u.id !== 'admin-larissa'
       );
 
-      filtered.unshift(larissaUser);
+      filtered.unshift(adminUser);
       setAvailableSellers(filtered);
     }, (error) => {
       console.warn("Aviso ao carregar usuários em tempo real, usando fallback local:", error);
       
-      const savedLocal = localStorage.getItem('atendepro_local_users');
+      const savedLocal = localStorage.getItem(`atendepro_local_users_${companyId}`) || localStorage.getItem('atendepro_local_users');
       let localUsersList: User[] = [];
       if (savedLocal) {
         try {
@@ -90,16 +101,17 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
       }
 
       let filtered = localUsersList.filter(u => 
-        u.name.toLowerCase() !== 'larissa' && 
+        sanitizeInput(u.name) !== sanitizeInput(configuredAdminName) &&
+        u.id !== adminUserId &&
         u.id !== 'admin-larissa'
       );
 
-      filtered.unshift(larissaUser);
+      filtered.unshift(adminUser);
       setAvailableSellers(filtered);
     });
 
     return () => unsub();
-  }, [companyId]);
+  }, [companyId, configuredAdminName, configuredAdminPass]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -112,31 +124,35 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
     setError(null);
 
     const inputName = sanitizeInput(username);
-    const inputPassword = sanitizeInput(password);
+    const inputPassword = password.trim();
 
-    // Direct check: Instant validation for administrator Larissa, case-insensitive
-    if (inputName === 'larissa') {
-      if (inputPassword !== '13259898') {
+    const isAdminLogin = 
+      inputName === sanitizeInput(configuredAdminName) || 
+      inputName === 'admin' || 
+      (companyId === 'atendepro_default' && inputName === 'larissa');
+
+    // Direct check: Instant validation for administrator
+    if (isAdminLogin) {
+      if (inputPassword !== configuredAdminPass) {
         setError('Senha de administrador incorreta.');
         setLoading(false);
         return;
       }
-      const larissaAdmin: User = {
-        id: 'admin-larissa',
-        name: 'Larissa',
-        password: '13259898',
+      const adminUserObj: User = {
+        id: `admin-${sanitizeInput(configuredAdminName)}`,
+        name: configuredAdminName,
+        password: configuredAdminPass,
         role: 'admin',
         createdAt: new Date().toISOString()
       };
       
-      // Sync Larissa admin user to Firestore
       try {
-        await setDoc(doc(db, 'companies', companyId, 'users', 'admin-larissa'), sanitizeFirestoreData(larissaAdmin));
+        await setDoc(doc(db, 'companies', companyId, 'users', adminUserObj.id), sanitizeFirestoreData(adminUserObj), { merge: true });
       } catch (syncErr) {
         console.warn("Could not sync admin:", syncErr);
       }
       
-      onLoginSuccess(larissaAdmin);
+      onLoginSuccess(adminUserObj);
       setLoading(false);
       return;
     }
@@ -259,9 +275,9 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
         {/* Branding Title */}
         <div className="text-center">
           <div className="mx-auto h-24 w-24 rounded-full border border-slate-150 overflow-hidden shadow-md mb-4 bg-white flex items-center justify-center">
-            <img src="https://i.postimg.cc/8CdttXNK/Whats-App-Image-2026-06-10-at-14-30-14.jpg" referrerPolicy="no-referrer" alt="Larissa Móveis Logo" className="w-full h-full object-cover" />
+            <img src={companyLogo} referrerPolicy="no-referrer" alt={`${companyName} Logo`} className="w-full h-full object-cover" />
           </div>
-          <h2 className="text-3xl font-extrabold text-slate-800 tracking-tight">Larissa Móveis</h2>
+          <h2 className="text-3xl font-extrabold text-slate-800 tracking-tight">{companyName}</h2>
           <p className="mt-2 text-sm text-slate-500">
             Atendimento Online • Portal de Vendedores e Gerente
           </p>
@@ -333,7 +349,7 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="block w-full px-3.5 py-2.5 pl-10 border border-slate-200 rounded-xl placeholder-slate-400 text-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
-                  placeholder={username.trim().toLowerCase() === 'larissa' ? "Digite sua senha" : "Não obrigatória para vendedores"}
+                  placeholder={sanitizeInput(username) === sanitizeInput(configuredAdminName) || sanitizeInput(username) === 'larissa' || sanitizeInput(username) === 'admin' ? `Digite a senha do administrador (${configuredAdminName})` : "Não obrigatória para vendedores"}
                 />
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                   <Key className="h-4 w-4" />
@@ -343,9 +359,9 @@ export default function LoginScreen({ companyId, onLoginSuccess }: LoginScreenPr
               {/* Dynamic feedback indicator for maximum clarity */}
               <p className="mt-1.5 text-[11px] font-medium leading-normal">
                 {username.trim() === '' ? (
-                  <span className="text-slate-400">ℹ️ Vendedores entram sem senha. Administradora precisa.</span>
-                ) : username.trim().toLowerCase() === 'larissa' ? (
-                  <span className="text-amber-600 font-semibold">🔒 Insira a senha da administradora Larissa.</span>
+                  <span className="text-slate-400">ℹ️ Vendedores entram sem senha. Administrador(a) precisa.</span>
+                ) : (sanitizeInput(username) === sanitizeInput(configuredAdminName) || sanitizeInput(username) === 'larissa' || sanitizeInput(username) === 'admin') ? (
+                  <span className="text-amber-600 font-semibold">🔒 Insira a senha do administrador ({configuredAdminName}).</span>
                 ) : (() => {
                   const found = availableSellers.find(s => s.role === 'seller' && sanitizeInput(s.name) === sanitizeInput(username));
                   if (found) {

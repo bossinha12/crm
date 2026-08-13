@@ -4,10 +4,30 @@ export enum ChatStatus {
   CLOSED = 'closed'
 }
 
+export type LicenseStatus = 'active' | 'trial' | 'blocked' | 'expired' | 'canceled';
+
+export interface CompanyLicense {
+  status: LicenseStatus;
+  planName?: string;
+  expiresAt?: string;
+  monthlyPrice?: number;
+  contactPhone?: string;
+  contactEmail?: string;
+  notes?: string;
+  createdAt?: string;
+  lastPaymentDate?: string;
+}
+
 export interface Company {
   id: string;
   name: string;
+  slug?: string;
+  logoUrl?: string;
+  primaryColor?: string;
+  adminName?: string;
+  adminPassword?: string;
   createdAt: string;
+  license?: CompanyLicense;
 }
 
 export interface User {

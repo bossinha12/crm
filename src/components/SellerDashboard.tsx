@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { collection, onSnapshot, query, orderBy, doc, updateDoc, addDoc, getDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, sanitizeFirestoreData } from '../lib/firebase';
-import { Chat, User, Message, ChatStatus } from '../types';
+import { Chat, User, Message, ChatStatus, Company } from '../types';
 import { crmAlarm } from '../lib/audio';
 import { 
   MessageSquare, User as UserIcon, Send, LogOut, Phone, ShieldClose, 
@@ -10,11 +10,12 @@ import {
 
 interface SellerDashboardProps {
   companyId: string;
+  company?: Company | null;
   sellerUser: User;
   onLogout: () => void;
 }
 
-export default function SellerDashboard({ companyId, sellerUser, onLogout }: SellerDashboardProps) {
+export default function SellerDashboard({ companyId, company, sellerUser, onLogout }: SellerDashboardProps) {
   const [chats, setAvailableChats] = useState<Chat[]>([]);
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [selectedChatMessages, setSelectedChatMessages] = useState<Message[]>([]);
@@ -279,7 +280,8 @@ export default function SellerDashboard({ companyId, sellerUser, onLogout }: Sel
   };
 
   const handleCopyLink = () => {
-    const clientLink = `${window.location.origin}${window.location.pathname}?view=client`;
+    const companyParam = companyId !== 'atendepro_default' ? `&company=${companyId}` : '';
+    const clientLink = `${window.location.origin}${window.location.pathname}?view=client${companyParam}`;
     navigator.clipboard.writeText(clientLink);
     setIsCopied(true);
     setTimeout(() => setIsCopied(false), 2000);
@@ -289,6 +291,9 @@ export default function SellerDashboard({ companyId, sellerUser, onLogout }: Sel
   const claimableChats = chats.filter(c => c.status === ChatStatus.NEW);
   const myActiveChats = chats.filter(c => c.status === ChatStatus.ACTIVE && c.sellerId === sellerUser.id);
 
+  const currentLogo = company?.logoUrl || 'https://i.postimg.cc/8CdttXNK/Whats-App-Image-2026-06-10-at-14-30-14.jpg';
+  const currentName = company?.name || 'Larissa Móveis';
+
   return (
     <div className="w-full flex flex-col gap-6">
       
@@ -296,14 +301,14 @@ export default function SellerDashboard({ companyId, sellerUser, onLogout }: Sel
       <div className="bg-slate-900 border border-slate-800 text-white rounded-2xl p-5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 relative overflow-hidden shrink-0 shadow-lg shadow-slate-900/10">
         <div className="flex items-center gap-3.5 mr-auto">
           <div className="w-12 h-12 rounded-full border border-slate-700 overflow-hidden shrink-0 bg-white shadow-inner flex items-center justify-center">
-            <img src="https://i.postimg.cc/8CdttXNK/Whats-App-Image-2026-06-10-at-14-30-14.jpg" referrerPolicy="no-referrer" alt="Larissa Móveis Logo" className="w-full h-full object-cover" />
+            <img src={currentLogo} referrerPolicy="no-referrer" alt={`${currentName} Logo`} className="w-full h-full object-cover" />
           </div>
           <div>
             <span className="text-indigo-400 font-extrabold text-[10px] tracking-wider uppercase bg-indigo-950/50 border border-indigo-800/10 px-2.5 py-0.5 rounded-full inline-block mb-1">
               CONEXÃO REAL-TIME ATIVA
             </span>
             <h2 className="text-xl font-bold tracking-tight">Atendimentos de {sellerUser.name}</h2>
-            <p className="text-xs text-slate-400 mt-0.5">Vendedor(a) Autorizado da Loja • CRM</p>
+            <p className="text-xs text-slate-400 mt-0.5">{currentName} • CRM Atendimento</p>
           </div>
         </div>
 

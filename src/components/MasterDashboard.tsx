@@ -1,22 +1,23 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { collection, onSnapshot, query, orderBy, doc, setDoc, deleteDoc, getDocs } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, sanitizeFirestoreData } from '../lib/firebase';
-import { User, Chat, Message, ChatStatus } from '../types';
+import { User, Chat, Message, ChatStatus, Company } from '../types';
 import { 
   BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer 
 } from 'recharts';
 import { 
   Users, UserPlus, FileText, Eye, Key, LogOut, Trash2, 
-  TrendingUp, TrendingDown, ClipboardList, ShieldAlert, CheckCircle 
+  TrendingUp, TrendingDown, ClipboardList, ShieldAlert, CheckCircle, Lock, Sparkles 
 } from 'lucide-react';
 
 interface MasterDashboardProps {
   companyId: string;
+  company?: Company | null;
   adminUser: User;
   onLogout: () => void;
 }
 
-export default function MasterDashboard({ companyId, adminUser, onLogout }: MasterDashboardProps) {
+export default function MasterDashboard({ companyId, company, adminUser, onLogout }: MasterDashboardProps) {
   const [users, setUsers] = useState<User[]>([]);
   const [chats, setChats] = useState<Chat[]>([]);
   
@@ -25,6 +26,11 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
   const [newSellerPassword, setNewSellerPassword] = useState('');
   const [registerSuccess, setRegisterSuccess] = useState<string | null>(null);
   const [registerError, setRegisterError] = useState<string | null>(null);
+
+  // Change Master Password state
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [newAdminPassInput, setNewAdminPassInput] = useState('');
+  const [passwordChangeSuccess, setPasswordChangeSuccess] = useState<string | null>(null);
 
   // Live Mirror session
   const [mirroredChatId, setMirroredChatId] = useState<string | null>(null);
@@ -700,6 +706,34 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
     printWindow.document.close();
   };
 
+  const currentLogo = company?.logoUrl || 'https://i.postimg.cc/8CdttXNK/Whats-App-Image-2026-06-10-at-14-30-14.jpg';
+  const currentName = company?.name || 'Larissa Móveis';
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newAdminPassInput.trim()) return;
+
+    try {
+      await setDoc(doc(db, 'companies', companyId), sanitizeFirestoreData({
+        adminPassword: newAdminPassInput.trim()
+      }), { merge: true });
+
+      await setDoc(doc(db, 'companies', companyId, 'users', adminUser.id), sanitizeFirestoreData({
+        password: newAdminPassInput.trim()
+      }), { merge: true });
+
+      setPasswordChangeSuccess('Senha master alterada com sucesso!');
+      setTimeout(() => {
+        setPasswordChangeSuccess(null);
+        setShowPasswordModal(false);
+        setNewAdminPassInput('');
+      }, 1500);
+    } catch (err) {
+      console.error('Erro ao atualizar senha:', err);
+      alert('Erro ao atualizar senha: ' + (err instanceof Error ? err.message : String(err)));
+    }
+  };
+
   return (
     <div className="w-full flex flex-col gap-6" id="master-console">
       
@@ -707,18 +741,30 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
       <div className="bg-slate-900 border border-slate-800 text-white rounded-2xl p-5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shrink-0 shadow-lg shadow-slate-950/15">
         <div className="flex items-center gap-3.5">
           <div className="w-12 h-12 rounded-full border border-slate-700 overflow-hidden shrink-0 bg-white shadow-inner flex items-center justify-center">
-            <img src="https://i.postimg.cc/8CdttXNK/Whats-App-Image-2026-06-10-at-14-30-14.jpg" referrerPolicy="no-referrer" alt="Larissa Móveis Logo" className="w-full h-full object-cover" />
+            <img src={currentLogo} referrerPolicy="no-referrer" alt={`${currentName} Logo`} className="w-full h-full object-cover" />
           </div>
           <div>
             <span className="text-indigo-400 font-extrabold text-[10px] tracking-wider uppercase bg-indigo-950/50 border border-indigo-800 px-2.5 py-0.5 rounded-full inline-block mb-1 animate-pulse">
               PAINEL MASTER • ADMINISTRADOR
             </span>
-            <h2 className="text-xl font-bold tracking-tight">Larissa Móveis Master Control</h2>
+            <h2 className="text-xl font-bold tracking-tight">{currentName} Master Control</h2>
             <p className="text-xs text-slate-400 mt-0.5">Gerenciador de equipes, gráficos de conversão e relatórios analíticos em tempo real</p>
           </div>
         </div>
 
         <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => {
+              setNewAdminPassInput(adminUser.password || '');
+              setShowPasswordModal(true);
+            }}
+            className="text-xs bg-slate-800 hover:bg-slate-700/90 border border-slate-700 rounded-xl px-3.5 py-2 font-bold text-amber-300 flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
+            title="Alterar a senha master de acesso"
+          >
+            <Key className="w-3.5 h-3.5 text-amber-400" />
+            <span>Trocar Senha</span>
+          </button>
+
           <button
             onClick={handleClearAllData}
             disabled={isClearing}
@@ -1136,6 +1182,66 @@ export default function MasterDashboard({ companyId, adminUser, onLogout }: Mast
         )}
 
       </div>
+
+      {/* Modal Alterar Senha Master */}
+      {showPasswordModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl text-white">
+            <div className="flex items-center gap-3 pb-3 border-b border-slate-800">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/30 text-amber-400 flex items-center justify-center">
+                <Key className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold">Alterar Senha do Painel Master</h3>
+                <p className="text-xs text-slate-400">{currentName}</p>
+              </div>
+            </div>
+
+            {passwordChangeSuccess ? (
+              <div className="bg-emerald-950 border border-emerald-800 rounded-2xl p-4 text-center space-y-2">
+                <CheckCircle className="w-8 h-8 text-emerald-400 mx-auto" />
+                <p className="text-xs font-bold text-emerald-200">{passwordChangeSuccess}</p>
+              </div>
+            ) : (
+              <form onSubmit={handleChangePassword} className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">
+                    Nova Senha de Acesso
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    autoFocus
+                    value={newAdminPassInput}
+                    onChange={(e) => setNewAdminPassInput(e.target.value)}
+                    placeholder="Digite sua nova senha..."
+                    className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl py-3 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  />
+                  <p className="text-[11px] text-slate-400">
+                    Ao salvar, utilize esta nova senha para futuros logins no Painel Master.
+                  </p>
+                </div>
+
+                <div className="pt-2 flex justify-end gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setShowPasswordModal(false)}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer"
+                  >
+                    Salvar Senha
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
 
     </div>
   );

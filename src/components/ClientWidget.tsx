@@ -7,10 +7,11 @@ import { Send, MessageSquare, Phone, User, CheckCheck, Landmark, RefreshCw, XCir
 interface ClientWidgetProps {
   companyId: string;
   companyName: string;
+  companyLogo?: string;
   onGoBack?: () => void;
 }
 
-export default function ClientWidget({ companyId, companyName, onGoBack }: ClientWidgetProps) {
+export default function ClientWidget({ companyId, companyName, companyLogo, onGoBack }: ClientWidgetProps) {
   const [chatId, setChatId] = useState<string | null>(localStorage.getItem(`atendepro_client_chat_id`));
   const [activeChat, setActiveChat] = useState<Chat | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -289,7 +290,7 @@ export default function ClientWidget({ companyId, companyName, onGoBack }: Clien
             <MessageSquare className="w-24 h-24" />
           </div>
           <div className="w-16 h-16 rounded-full border border-white/20 overflow-hidden shrink-0 bg-white shadow-inner flex items-center justify-center">
-            <img src="https://i.postimg.cc/8CdttXNK/Whats-App-Image-2026-06-10-at-14-30-14.jpg" referrerPolicy="no-referrer" alt="Larissa Móveis Logo" className="w-full h-full object-cover" />
+            <img src={companyLogo || 'https://i.postimg.cc/8CdttXNK/Whats-App-Image-2026-06-10-at-14-30-14.jpg'} referrerPolicy="no-referrer" alt={`${companyName} Logo`} className="w-full h-full object-cover" />
           </div>
           <div className="relative z-10 text-center sm:text-left">
             <p className="text-indigo-100 text-xs font-semibold uppercase tracking-wider">Suporte Ao Vivo</p>
