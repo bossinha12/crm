@@ -157,11 +157,9 @@ export default function LoginScreen({ companyId, company, onLoginSuccess }: Logi
       return;
     }
 
-    // Since the user is not Larissa, they are a seller. Sellers do not require password authentication.
-    // If they are not found in the loaded list, Firestore, or local backup, we auto-register them in real-time
-    // to guarantee they are recognized instantly and successfully logged in!
+    // Check if the user is a registered seller in the current company
     try {
-      // 1. Try matching with currently loaded list (which includes merged Firestore & localStorage)
+      // 1. Try matching with currently loaded list for this company (which includes merged Firestore & localStorage)
       const stateMatch = availableSellers.find(u => sanitizeInput(u.name) === inputName && u.role === 'seller');
       if (stateMatch) {
         onLoginSuccess(stateMatch);
@@ -169,7 +167,7 @@ export default function LoginScreen({ companyId, company, onLoginSuccess }: Logi
         return;
       }
 
-      // 2. Direct check Firestore users collection for a matching seller name
+      // 2. Fresh direct check on Firestore users collection for this company
       const usersRef = collection(db, 'companies', companyId, 'users');
       const snapshot = await getDocs(usersRef);
       let matchedSearch: User | null = null;
@@ -187,8 +185,8 @@ export default function LoginScreen({ companyId, company, onLoginSuccess }: Logi
         return;
       }
 
-      // 3. Fallback: Check local storage direct
-      const savedLocal = localStorage.getItem('atendepro_local_users');
+      // 3. Check company-specific local storage fallback
+      const savedLocal = localStorage.getItem(`atendepro_local_users_${companyId}`) || localStorage.getItem('atendepro_local_users');
       let localUsersList: User[] = [];
       if (savedLocal) {
         try {
@@ -203,36 +201,16 @@ export default function LoginScreen({ companyId, company, onLoginSuccess }: Logi
         return;
       }
 
-      // 4. If they are not registered yet, we dynamically register them on-the-fly!
-      const newUserId = 'seller_' + Math.random().toString(36).substring(2, 9);
-      const newSeller: User = {
-        id: newUserId,
-        name: username.trim(), // Keep exact casing typed by the user
-        role: 'seller',
-        password: '',
-        createdAt: new Date().toISOString()
-      };
-
-      // Save to localStorage
-      localUsersList.push(newSeller);
-      localStorage.setItem('atendepro_local_users', JSON.stringify(localUsersList));
-
-      // Save to Firestore
-      try {
-        await setDoc(doc(db, 'companies', companyId, 'users', newUserId), sanitizeFirestoreData(newSeller));
-      } catch (dbErr) {
-        console.warn("Aviso ao auto-cadastrar vendedor no Firestore:", dbErr);
-      }
-
-      onLoginSuccess(newSeller);
+      // 4. User is NOT registered in this company: Block access and show clear error message
+      setError(`Vendedor "${username.trim()}" não encontrado nesta loja. Solicite o cadastro ao administrador.`);
       setLoading(false);
       return;
 
     } catch (err) {
-      console.warn("Aviso durante verificação de login, usando fallback local de auto-cadastro:", err);
+      console.warn("Aviso durante verificação de login:", err);
       
-      // If we got a connection/permission error from Firestore, check localStorage as a safe fallback
-      const savedLocal = localStorage.getItem('atendepro_local_users');
+      // If Firestore had an error, check local storage as a final fallback
+      const savedLocal = localStorage.getItem(`atendepro_local_users_${companyId}`) || localStorage.getItem('atendepro_local_users');
       let localUsersList: User[] = [];
       if (savedLocal) {
         try {
@@ -247,20 +225,7 @@ export default function LoginScreen({ companyId, company, onLoginSuccess }: Logi
         return;
       }
 
-      // In case of any error/offline, auto-create locally and proceed
-      const newUserId = 'seller_' + Math.random().toString(36).substring(2, 9);
-      const newSeller: User = {
-        id: newUserId,
-        name: username.trim(),
-        role: 'seller',
-        password: '',
-        createdAt: new Date().toISOString()
-      };
-
-      localUsersList.push(newSeller);
-      localStorage.setItem('atendepro_local_users', JSON.stringify(localUsersList));
-
-      onLoginSuccess(newSeller);
+      setError(`Vendedor "${username.trim()}" não encontrado. Solicite o cadastro ao administrador.`);
       setLoading(false);
       return;
     } finally {
@@ -365,18 +330,18 @@ export default function LoginScreen({ companyId, company, onLoginSuccess }: Logi
               {/* Dynamic feedback indicator for maximum clarity */}
               <p className="mt-1.5 text-[11px] font-medium leading-normal">
                 {username.trim() === '' ? (
-                  <span className="text-slate-400">ℹ️ Vendedores entram sem senha. Administrador(a) precisa.</span>
+                  <span className="text-slate-400">ℹ️ Vendedores cadastrados entram sem senha. Administrador(a) precisa de senha.</span>
                 ) : (sanitizeInput(username) === sanitizeInput(configuredAdminName) || sanitizeInput(username) === 'larissa' || sanitizeInput(username) === 'admin') ? (
                   <span className="text-amber-600 font-semibold">🔒 Insira a senha do administrador ({configuredAdminName}).</span>
                 ) : (() => {
                   const found = availableSellers.find(s => s.role === 'seller' && sanitizeInput(s.name) === sanitizeInput(username));
                   if (found) {
                     return (
-                      <span className="text-emerald-600 font-semibold">🔓 Vendedor "{found.name}" reconhecido e ativo. Nenhuma senha é necessária!</span>
+                      <span className="text-emerald-600 font-semibold">🔓 Vendedor "{found.name}" cadastrado e ativo. Nenhuma senha é necessária!</span>
                     );
                   } else {
                     return (
-                      <span className="text-indigo-600 font-semibold">✨ Novo vendedor detectado! Seu cadastro será ativado instantaneamente ao entrar. Nenhuma senha é necessária!</span>
+                      <span className="text-amber-700 font-medium">⚠️ Vendedor não cadastrado. É necessário que o administrador cadastre este usuário previamente.</span>
                     );
                   }
                 })()}

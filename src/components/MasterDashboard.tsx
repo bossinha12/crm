@@ -507,6 +507,7 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
 
     // Save to localStorage immediately
     localUsersList.push(newUser);
+    localStorage.setItem(`atendepro_local_users_${companyId}`, JSON.stringify(localUsersList));
     localStorage.setItem('atendepro_local_users', JSON.stringify(localUsersList));
 
     // Update state immediately
@@ -546,6 +547,7 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
       } catch (e) {}
     }
     const filteredLocal = localUsersList.filter(u => u.id !== userId);
+    localStorage.setItem(`atendepro_local_users_${companyId}`, JSON.stringify(filteredLocal));
     localStorage.setItem('atendepro_local_users', JSON.stringify(filteredLocal));
 
     // Optimistic UI update
