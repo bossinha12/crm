@@ -13,6 +13,7 @@ export interface CompanyLicense {
   planType?: LicensePlanType;
   isLifetime?: boolean;
   planName?: string;
+  maxSellers?: number; // Limit of sellers allowed (0 or undefined = unlimited)
   expiresAt?: string;
   monthlyPrice?: number;
   contactPhone?: string;
@@ -30,6 +31,7 @@ export interface Company {
   primaryColor?: string;
   adminName?: string;
   adminPassword?: string;
+  maxSellers?: number;
   createdAt: string;
   license?: CompanyLicense;
 }

@@ -77,6 +77,7 @@ export default function SuperAdminDashboard({
   const [formNotes, setFormNotes] = useState('');
   const [formExpiryDays, setFormExpiryDays] = useState('30');
   const [formCustomExpiryDate, setFormCustomExpiryDate] = useState('');
+  const [formMaxSellers, setFormMaxSellers] = useState('5');
 
   // Password Change Modal for Companies
   const [passwordModalCompany, setPasswordModalCompany] = useState<Company | null>(null);
@@ -234,6 +235,7 @@ export default function SuperAdminDashboard({
     setFormNotes('');
     setFormExpiryDays('30');
     setFormCustomExpiryDate('');
+    setFormMaxSellers('5');
     setIsModalOpen(true);
   };
 
@@ -246,6 +248,7 @@ export default function SuperAdminDashboard({
     setFormAdminName(comp.adminName || 'Administrador');
     setFormAdminPassword(comp.adminPassword || '123456');
     setFormLicenseStatus(comp.license?.status || 'active');
+    setFormMaxSellers(String(comp.license?.maxSellers ?? comp.maxSellers ?? '5'));
     
     const isLife = comp.license?.isLifetime || comp.license?.planType === 'lifetime';
     setFormPlanType(isLife ? 'lifetime' : (comp.license?.planType || (comp.license?.status === 'trial' ? 'trial' : 'monthly')));
@@ -471,6 +474,8 @@ export default function SuperAdminDashboard({
       expiresAt = expDate.toISOString();
     }
 
+    const maxSellersNum = parseInt(formMaxSellers || '0', 10);
+
     const companyData: Company = {
       id: companyId,
       name: formName.trim(),
@@ -478,12 +483,14 @@ export default function SuperAdminDashboard({
       logoUrl: formLogoUrl.trim() || 'https://i.postimg.cc/8CdttXNK/Whats-App-Image-2026-06-10-at-14-30-14.jpg',
       adminName: formAdminName.trim() || 'Administrador',
       adminPassword: formAdminPassword.trim() || '123456',
+      maxSellers: maxSellersNum,
       createdAt: editingCompany?.createdAt || new Date().toISOString(),
       license: {
         status: formLicenseStatus,
         planType: formPlanType,
         isLifetime: isLifetime,
         planName: formPlanName.trim() || (isLifetime ? 'Plano Vitalício' : 'Plano Mensal'),
+        maxSellers: maxSellersNum,
         monthlyPrice: parseFloat(formMonthlyPrice) || 0,
         expiresAt,
         contactPhone: formContactPhone.trim(),
@@ -975,6 +982,9 @@ export default function SuperAdminDashboard({
                         ) : (
                           <span>Mensalidade: <strong className="text-emerald-400">R$ {(comp.license?.monthlyPrice || 0).toFixed(2)}/mês</strong></span>
                         )}
+                        <span className="text-indigo-300 font-medium">
+                          Limite: <strong className="text-white">{(comp.license?.maxSellers ?? comp.maxSellers) ? `${comp.license?.maxSellers ?? comp.maxSellers} Vendedores` : 'Ilimitado (Sem limite)'}</strong>
+                        </span>
                         {comp.license?.contactPhone && (
                           <span className="flex items-center gap-1">
                             <Phone className="w-3 h-3 text-slate-500" />
@@ -1426,6 +1436,55 @@ export default function SuperAdminDashboard({
                       </div>
                     </div>
                   )}
+                </div>
+
+                {/* Row 4.5: Limite de Vendedores por Plano */}
+                <div className="pt-3 border-t border-slate-800/80 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-indigo-300 uppercase tracking-wider block">
+                      👥 Limite de Vendedores (Vagas do Plano)
+                    </label>
+                    <span className="text-[11px] text-slate-400">
+                      {formMaxSellers === '0' || formMaxSellers === '' ? '♾️ Ilimitado' : `Máximo de ${formMaxSellers} vendedor(es)`}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                    {[
+                      { value: '1', label: '1 Vendedor', sub: 'Individual' },
+                      { value: '3', label: '3 Vendedores', sub: 'Básico' },
+                      { value: '5', label: '5 Vendedores', sub: 'Padrão' },
+                      { value: '10', label: '10 Vendedores', sub: 'Pro' },
+                      { value: '0', label: '♾️ Ilimitado', sub: 'Sem Limite' },
+                    ].map((opt) => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => setFormMaxSellers(opt.value)}
+                        className={`py-2 px-2 rounded-xl border text-xs font-bold flex flex-col items-center justify-center gap-0.5 transition-all cursor-pointer ${
+                          formMaxSellers === opt.value
+                            ? 'bg-indigo-950 border-indigo-500 text-indigo-200 shadow-md ring-1 ring-indigo-500'
+                            : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                        }`}
+                      >
+                        <span>{opt.label}</span>
+                        <span className="text-[9px] font-normal opacity-70">{opt.sub}</span>
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-1">
+                    <span className="text-xs text-slate-400 whitespace-nowrap">Ou defina quantidade exata:</span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={formMaxSellers}
+                      onChange={(e) => setFormMaxSellers(e.target.value)}
+                      placeholder="0 para ilimitado ou ex: 2, 4, 8"
+                      className="w-36 bg-slate-900 border border-slate-800 text-white rounded-xl py-1.5 px-3 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 font-semibold"
+                    />
+                    <span className="text-[11px] text-slate-500">(0 = sem limites de cadastro)</span>
+                  </div>
                 </div>
               </div>
 

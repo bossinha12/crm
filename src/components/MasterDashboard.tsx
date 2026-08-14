@@ -20,6 +20,7 @@ interface MasterDashboardProps {
 }
 
 export default function MasterDashboard({ companyId, company, adminUser, onLogout }: MasterDashboardProps) {
+  const [liveCompany, setLiveCompany] = useState<Company | null>(company || null);
   const [users, setUsers] = useState<User[]>([]);
   const [chats, setChats] = useState<Chat[]>([]);
   
@@ -59,6 +60,28 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
   const [newLeadPhone, setNewLeadPhone] = useState('');
   const [newLeadNotes, setNewLeadNotes] = useState('');
   const [leadActionSuccess, setLeadActionSuccess] = useState<string | null>(null);
+
+  // Synchronize company profile and plan in real time
+  useEffect(() => {
+    if (company) setLiveCompany(company);
+  }, [company]);
+
+  useEffect(() => {
+    const compRef = doc(db, 'companies', companyId);
+    const unsub = onSnapshot(compRef, (snap) => {
+      if (snap.exists()) {
+        setLiveCompany({ id: snap.id, ...snap.data() } as Company);
+      }
+    }, (err) => console.warn("Live company sync warning:", err));
+    return () => unsub();
+  }, [companyId]);
+
+  // Seller Limits Calculation
+  const registeredSellers = users.filter(u => u.role === 'seller');
+  const sellerCount = registeredSellers.length;
+  const maxSellers = liveCompany?.license?.maxSellers ?? liveCompany?.maxSellers ?? 0;
+  const hasSellerLimit = maxSellers > 0;
+  const isSellerLimitReached = hasSellerLimit && sellerCount >= maxSellers;
 
   // Load all users (Vendedores) in real time
   useEffect(() => {
@@ -471,6 +494,12 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
     e.preventDefault();
     setRegisterError(null);
     setRegisterSuccess(null);
+
+    // Enforce Seller Plan Limit
+    if (isSellerLimitReached) {
+      setRegisterError(`Limite de vagas atingido! Seu plano atual permite no máximo ${maxSellers} vendedor(es). Entre em contato com o suporte para fazer upgrade do plano.`);
+      return;
+    }
 
     const nameToRegister = newSellerName.trim();
 
@@ -1418,13 +1447,31 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
             
             {/* List column (Lg: col-span-7) */}
-            <div className="lg:col-span-7 bg-white border border-slate-100 rounded-2xl shadow-xl p-5 flex flex-col h-[400px]">
-              <h3 className="text-slate-800 font-extrabold text-sm tracking-tight mb-3">VENDEDORES CADASTRADOS</h3>
+            <div className="lg:col-span-7 bg-white border border-slate-100 rounded-2xl shadow-xl p-5 flex flex-col h-[420px]">
+              <div className="flex items-center justify-between gap-2 mb-3">
+                <h3 className="text-slate-800 font-extrabold text-sm tracking-tight">VENDEDORES CADASTRADOS</h3>
+                <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${
+                  isSellerLimitReached
+                    ? 'bg-rose-50 text-rose-700 border-rose-200 shadow-sm'
+                    : hasSellerLimit
+                    ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                    : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                }`}>
+                  {hasSellerLimit 
+                    ? `👥 ${sellerCount} de ${maxSellers} Vagas Preenchidas` 
+                    : `👥 ${sellerCount} Vendedor(es) • Ilimitado`}
+                </span>
+              </div>
               
               <div className="grow overflow-y-auto space-y-3 pr-2">
-                {users
-                  .filter(u => u.role === 'seller')
-                  .map((item) => (
+                {registeredSellers.length === 0 ? (
+                  <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-400">
+                    <Users className="w-10 h-10 text-slate-300 mb-2" />
+                    <p className="font-semibold text-sm text-slate-600">Nenhum vendedor cadastrado ainda</p>
+                    <p className="text-xs text-slate-400 mt-1">Utilize o formulário ao lado para cadastrar seu primeiro atendente.</p>
+                  </div>
+                ) : (
+                  registeredSellers.map((item) => (
                     <div key={item.id} className="p-3.5 border border-slate-100 hover:border-slate-200 rounded-xl flex items-center justify-between gap-3">
                       <div>
                         <p className="font-bold text-slate-800 text-sm">{item.name}</p>
@@ -1452,43 +1499,69 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
                         </button>
                       </div>
                     </div>
-                  ))}
+                  ))
+                )}
               </div>
             </div>
 
             {/* Form Column (Lg: col-span-5) */}
-            <div className="lg:col-span-5 bg-white border border-slate-100 rounded-2xl shadow-xl p-5 flex flex-col justify-between h-[400px]">
-              <form onSubmit={handleRegisterSeller} className="space-y-4 grow">
-                <h3 className="text-slate-800 font-extrabold text-sm tracking-tight">CADASTRAR NOVO VENDEDOR</h3>
-                
-                {registerSuccess && (
-                  <div className="bg-green-50 border border-green-100 text-green-800 p-3 rounded-lg text-xs flex items-center gap-1.5">
-                    <CheckCircle className="w-4 h-4 text-green-600" />
-                    <span>{registerSuccess}</span>
+            <div className="lg:col-span-5 bg-white border border-slate-100 rounded-2xl shadow-xl p-5 flex flex-col justify-between h-[420px]">
+              <form onSubmit={handleRegisterSeller} className="space-y-3.5 grow flex flex-col justify-between">
+                <div className="space-y-3.5">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-slate-800 font-extrabold text-sm tracking-tight">CADASTRAR NOVO VENDEDOR</h3>
+                    {hasSellerLimit && (
+                      <span className="text-[11px] font-semibold text-slate-500">
+                        Plano: <strong>{maxSellers} Atendentes</strong>
+                      </span>
+                    )}
                   </div>
-                )}
-                {registerError && (
-                  <div className="bg-rose-50 border border-rose-100 text-rose-800 p-3 rounded-lg text-xs flex items-center gap-1.5">
-                    <ShieldAlert className="w-4 h-4 text-rose-600" />
-                    <span>{registerError}</span>
-                  </div>
-                )}
+                  
+                  {/* Limit Reached Warning */}
+                  {isSellerLimitReached && (
+                    <div className="bg-amber-50 border border-amber-200 text-amber-900 p-3 rounded-xl text-xs flex items-start gap-2.5 shadow-sm">
+                      <ShieldAlert className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-bold text-amber-900">Limite de vagas preenchido ({sellerCount}/{maxSellers})</p>
+                        <p className="text-amber-800/90 text-[11px] mt-0.5 leading-snug">
+                          Você atingiu o limite de atendentes contratados para este plano. Para liberar novas vagas, remova um vendedor anterior ou solicite um upgrade de plano.
+                        </p>
+                      </div>
+                    </div>
+                  )}
 
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block mb-1">
-                    Nome Completo do Vendedor *
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      required
-                      value={newSellerName}
-                      onChange={(e) => setNewSellerName(e.target.value)}
-                      placeholder="Ex: Pedro de Souza"
-                      className="w-full text-slate-800 text-sm py-2 px-3.5 pl-10 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
-                    />
-                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                      <UserPlus className="w-4 h-4" />
+                  {registerSuccess && (
+                    <div className="bg-green-50 border border-green-100 text-green-800 p-3 rounded-lg text-xs flex items-center gap-1.5">
+                      <CheckCircle className="w-4 h-4 text-green-600" />
+                      <span>{registerSuccess}</span>
+                    </div>
+                  )}
+                  {registerError && (
+                    <div className="bg-rose-50 border border-rose-100 text-rose-800 p-3 rounded-lg text-xs flex items-center gap-1.5">
+                      <ShieldAlert className="w-4 h-4 text-rose-600" />
+                      <span>{registerError}</span>
+                    </div>
+                  )}
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block mb-1">
+                      Nome Completo do Vendedor *
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        required
+                        disabled={isSellerLimitReached}
+                        value={newSellerName}
+                        onChange={(e) => setNewSellerName(e.target.value)}
+                        placeholder={isSellerLimitReached ? 'Limite de vagas atingido' : 'Ex: Pedro de Souza'}
+                        className={`w-full text-slate-800 text-sm py-2 px-3.5 pl-10 border rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 ${
+                          isSellerLimitReached ? 'bg-slate-100 text-slate-400 cursor-not-allowed border-slate-200' : 'border-slate-200'
+                        }`}
+                      />
+                      <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                        <UserPlus className="w-4 h-4" />
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1496,10 +1569,15 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
                 <div className="pt-2">
                   <button
                     type="submit"
-                    className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-semibold shadow-lg shadow-indigo-100 flex items-center justify-center gap-2 transition-all cursor-pointer"
+                    disabled={isSellerLimitReached}
+                    className={`w-full py-2.5 text-white rounded-xl font-semibold shadow-lg flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                      isSellerLimitReached
+                        ? 'bg-slate-400 shadow-none cursor-not-allowed opacity-60'
+                        : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-100'
+                    }`}
                   >
                     <UserPlus className="w-4 h-4" />
-                    <span>Gravar Vendedor</span>
+                    <span>{isSellerLimitReached ? 'Vagas Esgotadas (Faça Upgrade)' : 'Gravar Vendedor'}</span>
                   </button>
                 </div>
               </form>
