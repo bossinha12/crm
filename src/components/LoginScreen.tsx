@@ -23,12 +23,41 @@ export default function LoginScreen({ companyId, company, onLoginSuccess }: Logi
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [availableSellers, setAvailableSellers] = useState<User[]>([]);
+
+  const configuredAdminName = company?.adminName || (companyId === 'atendepro_default' ? 'Larissa' : 'Administrador');
+  const configuredAdminPass = company?.adminPassword || '13259898';
+
+  // Synchronously initialize sellers list from cache to prevent UI pop-in / trembling
+  const [availableSellers, setAvailableSellers] = useState<User[]>(() => {
+    const adminUserId = `admin-${sanitizeInput(configuredAdminName)}`;
+    const adminUser: User = {
+      id: adminUserId,
+      name: configuredAdminName,
+      password: configuredAdminPass,
+      role: 'admin',
+      createdAt: new Date().toISOString()
+    };
+
+    const savedLocal = localStorage.getItem(`atendepro_local_users_${companyId}`) || localStorage.getItem('atendepro_local_users');
+    let localUsersList: User[] = [];
+    if (savedLocal) {
+      try {
+        localUsersList = JSON.parse(savedLocal);
+      } catch (e) {}
+    }
+
+    let filtered = localUsersList.filter(u => 
+      sanitizeInput(u.name) !== sanitizeInput(configuredAdminName) &&
+      u.id !== adminUserId &&
+      u.id !== 'admin-larissa'
+    );
+
+    filtered.unshift(adminUser);
+    return filtered;
+  });
 
   const companyName = company?.name || (companyId === 'atendepro_default' ? 'Larissa Móveis' : 'Portal de Atendimento');
   const companyLogo = company?.logoUrl || (companyId === 'atendepro_default' ? 'https://i.postimg.cc/8CdttXNK/Whats-App-Image-2026-06-10-at-14-30-14.jpg' : '');
-  const configuredAdminName = company?.adminName || (companyId === 'atendepro_default' ? 'Larissa' : 'Administrador');
-  const configuredAdminPass = company?.adminPassword || '13259898';
 
   // Listen to registered employees in real-time to make login select options or quick selections available instantly
   useEffect(() => {
@@ -234,12 +263,12 @@ export default function LoginScreen({ companyId, company, onLoginSuccess }: Logi
   };
 
   return (
-    <div id="login-container" className="min-h-[80vh] flex flex-col justify-center items-center py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8 bg-white p-8 rounded-2xl border border-slate-100 shadow-xl shadow-slate-100 transition-all">
+    <div id="login-container" className="flex flex-col justify-center items-center py-4 sm:py-8 px-4 sm:px-6 w-full max-w-md mx-auto">
+      <div className="w-full space-y-6 bg-white p-6 sm:p-8 rounded-2xl border border-slate-200/80 shadow-lg shadow-slate-200/50">
         
         {/* Branding Title */}
         <div className="text-center">
-          <div className="mx-auto h-24 w-24 rounded-full border border-slate-200 overflow-hidden shadow-md mb-4 bg-slate-50 flex items-center justify-center">
+          <div className="mx-auto h-20 w-20 sm:h-24 sm:w-24 rounded-full border border-slate-200 overflow-hidden shadow-md mb-3 bg-slate-50 flex items-center justify-center">
             {companyLogo ? (
               <img src={companyLogo} referrerPolicy="no-referrer" alt={`${companyName} Logo`} className="w-full h-full object-cover" />
             ) : (
@@ -248,8 +277,8 @@ export default function LoginScreen({ companyId, company, onLoginSuccess }: Logi
               </span>
             )}
           </div>
-          <h2 className="text-3xl font-extrabold text-slate-800 tracking-tight">{companyName}</h2>
-          <p className="mt-2 text-sm text-slate-500">
+          <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-800 tracking-tight">{companyName}</h2>
+          <p className="mt-1.5 text-xs sm:text-sm text-slate-500">
             Atendimento Online • Portal de Vendedores e Gerente
           </p>
         </div>
@@ -263,7 +292,7 @@ export default function LoginScreen({ companyId, company, onLoginSuccess }: Logi
           </div>
         )}
 
-        <form className="mt-8 space-y-6" onSubmit={handleLogin}>
+        <form className="mt-6 space-y-5" onSubmit={handleLogin}>
           <div className="space-y-4">
             
             {/* Direct selector for registered salesmen if any, helper */}
@@ -327,8 +356,8 @@ export default function LoginScreen({ companyId, company, onLoginSuccess }: Logi
                 </div>
               </div>
               
-              {/* Dynamic feedback indicator for maximum clarity */}
-              <p className="mt-1.5 text-[11px] font-medium leading-normal">
+              {/* Dynamic feedback indicator with stable min-height */}
+              <div className="mt-1.5 min-h-[1.5rem] text-[11px] font-medium leading-normal flex items-center">
                 {username.trim() === '' ? (
                   <span className="text-slate-400">ℹ️ Vendedores cadastrados entram sem senha. Administrador(a) precisa de senha.</span>
                 ) : (sanitizeInput(username) === sanitizeInput(configuredAdminName) || sanitizeInput(username) === 'larissa' || sanitizeInput(username) === 'admin') ? (
@@ -345,7 +374,7 @@ export default function LoginScreen({ companyId, company, onLoginSuccess }: Logi
                     );
                   }
                 })()}
-              </p>
+              </div>
             </div>
 
           </div>
@@ -354,7 +383,7 @@ export default function LoginScreen({ companyId, company, onLoginSuccess }: Logi
             <button
               type="submit"
               disabled={loading}
-              className="group relative w-full flex justify-center py-2.5 px-4 border border-transparent text-sm font-semibold rounded-xl text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors disabled:opacity-50"
+              className="group relative w-full flex justify-center py-2.5 px-4 border border-transparent text-sm font-semibold rounded-xl text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors disabled:opacity-50 cursor-pointer"
             >
               {loading ? 'Validando...' : 'Entrar no CRM'}
             </button>

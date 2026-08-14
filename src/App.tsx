@@ -462,9 +462,9 @@ export default function App() {
     const hasPortalAccess = params.get('portal') === 'true';
 
     return (
-      <main className="min-h-screen bg-slate-100 flex flex-col p-4 font-sans leading-relaxed relative">
-        {hasPortalAccess && (
-          <div className="absolute top-4 left-4">
+      <main className="min-h-screen bg-slate-100 flex flex-col justify-between p-4 sm:p-6 font-sans leading-relaxed relative">
+        {hasPortalAccess ? (
+          <div className="w-full flex justify-start">
             <button
               onClick={() => {
                 const newParams = new URLSearchParams(window.location.search);
@@ -472,19 +472,24 @@ export default function App() {
                 window.history.pushState({}, '', `?${newParams.toString()}`);
                 setCurrentView('home');
               }}
-              className="text-xs font-semibold bg-white border border-slate-200 text-slate-500 hover:text-slate-800 px-3.5 py-2 rounded-xl transition-all cursor-pointer"
+              className="text-xs font-semibold bg-white border border-slate-200 text-slate-500 hover:text-slate-800 px-3.5 py-2 rounded-xl transition-colors cursor-pointer shadow-sm"
             >
               ← Voltar para o Início
             </button>
           </div>
+        ) : (
+          <div className="h-2" />
         )}
-        <LoginScreen 
-          companyId={companyId} 
-          company={company}
-          onLoginSuccess={(user) => setCurrentUser(user)} 
-        />
 
-        <div className="text-center pb-4">
+        <div className="my-auto w-full flex items-center justify-center">
+          <LoginScreen 
+            companyId={companyId} 
+            company={company}
+            onLoginSuccess={(user) => setCurrentUser(user)} 
+          />
+        </div>
+
+        <div className="text-center py-2">
           <button
             onClick={() => {
               window.history.pushState({}, '', '?view=superadmin');
