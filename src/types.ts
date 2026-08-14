@@ -67,6 +67,7 @@ export interface Message {
   senderType: 'client' | 'seller';
   senderName: string;
   text: string;
+  imageUrl?: string;
   createdAt: string;
 }
 
@@ -82,3 +83,20 @@ export interface Report {
   }>;
   generatedAt: string;
 }
+
+export interface Lead {
+  id: string;
+  companyId: string;
+  name: string;
+  phone: string;
+  email?: string;
+  firstContactAt: string;
+  lastContactAt: string;
+  totalContactsCount?: number;
+  lastMessage?: string;
+  notes?: string;
+  tags?: string[];
+  status?: 'active' | 'contacted' | 'converted' | 'unsubscribed';
+  source?: string;
+}
+

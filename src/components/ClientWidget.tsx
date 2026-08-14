@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { doc, setDoc, collection, onSnapshot, query, orderBy, addDoc, updateDoc, getDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, sanitizeFirestoreData } from '../lib/firebase';
-import { Chat, Message, ChatStatus } from '../types';
-import { Send, MessageSquare, Phone, User, CheckCheck, Landmark, RefreshCw, XCircle } from 'lucide-react';
+import { uploadToImgBB } from '../lib/imgbb';
+import { Chat, Message, ChatStatus, Lead } from '../types';
+import { Send, MessageSquare, Phone, User, CheckCheck, Landmark, RefreshCw, XCircle, Image as ImageIcon, Camera, Loader2, ExternalLink, X } from 'lucide-react';
 
 interface ClientWidgetProps {
   companyId: string;
@@ -25,6 +26,12 @@ export default function ClientWidget({ companyId, companyName, companyLogo, onGo
 
   // Form Field for actively writing messages
   const [currentMessage, setCurrentMessage] = useState('');
+  
+  // Image Upload State
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   
   const bottomRef = useRef<HTMLDivElement>(null);
   const activeChatRef = useRef<Chat | null>(null);
@@ -156,9 +163,66 @@ export default function ClientWidget({ companyId, companyName, companyLogo, onGo
     localStorage.setItem(`atendepro_client_chat_id`, newChatId);
     localStorage.setItem('atendepro_client_name', clientName.trim());
 
+    // Prepare lead record for marketing / promotions
+    const cleanPhoneDigits = (clientPhone || '').replace(/\D/g, '');
+    const leadDocId = cleanPhoneDigits ? `lead_${cleanPhoneDigits}` : `lead_${newChatId}`;
+    const leadRecord: Lead = {
+      id: leadDocId,
+      companyId,
+      name: clientName.trim(),
+      phone: clientPhone.trim() || 'Não informado',
+      firstContactAt: new Date().toISOString(),
+      lastContactAt: new Date().toISOString(),
+      lastMessage: initialMsg.trim() || 'Iniciou o atendimento',
+      totalContactsCount: 1,
+      status: 'active',
+      source: 'chat_widget'
+    };
+
+    // Save lead in local backup immediately
+    try {
+      const localLeadsKey = `atendepro_leads_${companyId}`;
+      const existingLocalLeads: Lead[] = JSON.parse(localStorage.getItem(localLeadsKey) || '[]');
+      const foundIdx = existingLocalLeads.findIndex(l => l.id === leadDocId || (cleanPhoneDigits && l.phone.replace(/\D/g, '') === cleanPhoneDigits));
+      if (foundIdx >= 0) {
+        existingLocalLeads[foundIdx] = {
+          ...existingLocalLeads[foundIdx],
+          name: clientName.trim() || existingLocalLeads[foundIdx].name,
+          phone: clientPhone.trim() || existingLocalLeads[foundIdx].phone,
+          lastContactAt: new Date().toISOString(),
+          lastMessage: initialMsg.trim() || existingLocalLeads[foundIdx].lastMessage,
+          totalContactsCount: (existingLocalLeads[foundIdx].totalContactsCount || 1) + 1
+        };
+      } else {
+        existingLocalLeads.unshift(leadRecord);
+      }
+      localStorage.setItem(localLeadsKey, JSON.stringify(existingLocalLeads));
+    } catch (e) {}
+
     try {
       // Create new chat doc in Firestore silently
       await setDoc(doc(db, 'companies', companyId, 'chats', newChatId), sanitizeFirestoreData(generatedChat));
+
+      // Save lead doc in Firestore silently for future marketing/promotions
+      try {
+        const leadRef = doc(db, 'companies', companyId, 'leads', leadDocId);
+        const leadSnap = await getDoc(leadRef);
+        if (leadSnap.exists()) {
+          const old = leadSnap.data() as Lead;
+          await setDoc(leadRef, sanitizeFirestoreData({
+            ...old,
+            name: clientName.trim() || old.name,
+            phone: clientPhone.trim() || old.phone,
+            lastContactAt: new Date().toISOString(),
+            lastMessage: initialMsg.trim() || old.lastMessage,
+            totalContactsCount: (old.totalContactsCount || 1) + 1
+          }), { merge: true });
+        } else {
+          await setDoc(leadRef, sanitizeFirestoreData(leadRecord));
+        }
+      } catch (leadError) {
+        console.warn("Aviso: Falha silenciosa ao salvar lead no Firestore:", leadError);
+      }
 
       // Create first message if provided in Firestore silently
       const messagesRef = collection(db, 'companies', companyId, 'chats', newChatId, 'messages');
@@ -265,6 +329,108 @@ export default function ClientWidget({ companyId, companyName, companyLogo, onGo
     } catch (err) {
       console.warn("Aviso: Conexão remota offline para enviar mensagens. Guardadas localmente no navegador por enquanto.", err);
       setSyncError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !chatId) return;
+
+    if (!file.type.startsWith('image/')) {
+      setUploadError('Por favor selecione um arquivo de imagem válido (JPG, PNG, WEBP).');
+      setTimeout(() => setUploadError(null), 4000);
+      return;
+    }
+
+    if (file.size > 15 * 1024 * 1024) {
+      setUploadError('A imagem deve ter no máximo 15MB.');
+      setTimeout(() => setUploadError(null), 4000);
+      return;
+    }
+
+    setIsUploadingImage(true);
+    setUploadError(null);
+
+    try {
+      // 1. Upload directly to ImgBB and obtain lightweight permanent URL
+      const imageUrl = await uploadToImgBB(file);
+
+      // 2. Build Message with image URL
+      const newMsgId = 'msg_' + Math.random().toString(36).substring(2, 11) + '_' + Date.now().toString().slice(-4);
+      const newMsg: Message = {
+        id: newMsgId,
+        chatId,
+        companyId,
+        senderType: 'client',
+        senderName: activeChat?.clientName || clientName || 'Cliente',
+        text: '📷 Foto enviada',
+        imageUrl,
+        createdAt: new Date().toISOString()
+      };
+
+      // Optimistic update
+      const updatedMessages = [...messages, newMsg];
+      setMessages(updatedMessages);
+      localStorage.setItem(`atendepro_backup_msgs_${chatId}`, JSON.stringify(updatedMessages));
+
+      if (activeChat) {
+        const updatedChat = {
+          ...activeChat,
+          lastMessage: '📷 Foto',
+          lastMessageAt: new Date().toISOString(),
+          lastMessageSender: 'client' as const,
+          unreadBySeller: true,
+          updatedAt: new Date().toISOString()
+        };
+        setActiveChat(updatedChat);
+        localStorage.setItem(`atendepro_backup_chat_${chatId}`, JSON.stringify(updatedChat));
+      }
+
+      // Save message to Firestore with ImgBB URL only (no heavy binary stored in DB!)
+      const messagesRef = collection(db, 'companies', companyId, 'chats', chatId, 'messages');
+      await addDoc(messagesRef, sanitizeFirestoreData({
+        chatId,
+        companyId,
+        senderType: 'client',
+        senderName: activeChat?.clientName || clientName || 'Cliente',
+        text: '📷 Foto enviada',
+        imageUrl,
+        createdAt: new Date().toISOString()
+      }));
+
+      const chatDocRef = doc(db, 'companies', companyId, 'chats', chatId);
+      const chatPayload = activeChat ? {
+        ...activeChat,
+        lastMessage: '📷 Foto',
+        lastMessageAt: new Date().toISOString(),
+        lastMessageSender: 'client' as const,
+        unreadBySeller: true,
+        updatedAt: new Date().toISOString()
+      } : {
+        id: chatId,
+        companyId,
+        clientName: clientName || 'Cliente',
+        clientPhone: '',
+        status: ChatStatus.NEW,
+        unreadBySeller: true,
+        unreadByClient: false,
+        lastMessage: '📷 Foto',
+        lastMessageAt: new Date().toISOString(),
+        lastMessageSender: 'client' as const,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      await setDoc(chatDocRef, sanitizeFirestoreData(chatPayload), { merge: true });
+
+    } catch (err) {
+      console.error("Erro ao enviar foto via ImgBB:", err);
+      setUploadError(err instanceof Error ? err.message : 'Erro ao enviar imagem ao ImgBB.');
+      setTimeout(() => setUploadError(null), 4000);
+    } finally {
+      setIsUploadingImage(false);
+      if (imageInputRef.current) {
+        imageInputRef.current.value = '';
+      }
     }
   };
 
@@ -450,6 +616,18 @@ export default function ClientWidget({ companyId, companyName, companyLogo, onGo
         </div>
       )}
 
+      {uploadError && (
+        <div className="bg-rose-50 border-b border-rose-200 text-rose-800 text-[11px] sm:text-xs px-4 py-2 flex items-center justify-between gap-2">
+          <span>⚠️ {uploadError}</span>
+          <button 
+            onClick={() => setUploadError(null)} 
+            className="text-rose-500 hover:text-rose-700 font-bold px-1.5 py-0.5 hover:bg-rose-100 rounded cursor-pointer text-xs"
+          >
+            Dispensar
+          </button>
+        </div>
+      )}
+
       {/* Messages Scroll Area */}
       <div className="grow overflow-y-auto p-5 space-y-4 bg-white" id="messages-stream">
         
@@ -460,6 +638,7 @@ export default function ClientWidget({ companyId, companyName, companyLogo, onGo
 
         {messages.map((m) => {
           const isMe = m.senderType === 'client';
+          const hasImage = !!m.imageUrl;
           return (
             <div
               key={m.id}
@@ -469,13 +648,37 @@ export default function ClientWidget({ companyId, companyName, companyLogo, onGo
                 {isMe ? 'Você' : m.senderName}
               </div>
               <div
-                className={`max-w-[85%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${
+                className={`max-w-[85%] rounded-2xl text-sm leading-relaxed overflow-hidden ${
                   isMe
                     ? 'bg-indigo-600 text-white rounded-tr-none shadow-md shadow-indigo-50'
                     : 'bg-slate-100 text-slate-800 rounded-tl-none border border-slate-100'
-                }`}
+                } ${hasImage ? 'p-2' : 'px-4 py-2.5'}`}
               >
-                {m.text}
+                {hasImage && (
+                  <div className="space-y-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setPreviewImageUrl(m.imageUrl || null)}
+                      className="block overflow-hidden rounded-xl bg-black/10 relative group cursor-pointer"
+                      title="Clique para ampliar a imagem"
+                    >
+                      <img
+                        src={m.imageUrl}
+                        alt="Imagem enviada"
+                        referrerPolicy="no-referrer"
+                        className="w-full max-h-64 object-cover rounded-xl transition-transform group-hover:scale-102"
+                      />
+                      <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-xs font-semibold gap-1">
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        <span>Ampliar</span>
+                      </div>
+                    </button>
+                    {m.text && m.text !== '📷 Foto enviada' && m.text !== '📷 Foto' && (
+                      <p className="px-2 py-1 text-xs">{m.text}</p>
+                    )}
+                  </div>
+                )}
+                {!hasImage && m.text}
               </div>
             </div>
           );
@@ -502,22 +705,103 @@ export default function ClientWidget({ companyId, companyName, companyLogo, onGo
 
       {/* Active Messaging input footer */}
       {activeChat?.status !== ChatStatus.CLOSED && (
-        <form onSubmit={handleSendMessage} className="bg-slate-50 border-t border-slate-200 p-4 shrink-0 flex items-center gap-3">
-          <input
-            type="text"
-            required
-            value={currentMessage}
-            onChange={(e) => setCurrentMessage(e.target.value)}
-            placeholder="Digite sua resposta comercial..."
-            className="grow py-2.5 px-4 text-sm text-slate-800 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
-          />
-          <button
-            type="submit"
-            className="p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-md shadow-indigo-100 transition-colors flex items-center justify-center shrink-0 cursor-pointer"
+        <div className="bg-slate-50 border-t border-slate-200 p-3 shrink-0">
+          <form onSubmit={handleSendMessage} className="flex items-center gap-2">
+            {/* Hidden File Input for ImgBB Upload */}
+            <input
+              type="file"
+              ref={imageInputRef}
+              accept="image/*"
+              className="hidden"
+              onChange={handleImageUpload}
+              disabled={isUploadingImage}
+            />
+
+            {/* Photo / Image attach button */}
+            <button
+              type="button"
+              disabled={isUploadingImage}
+              onClick={() => imageInputRef.current?.click()}
+              title="Enviar foto do celular ou computador (ImgBB)"
+              className="p-2.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 active:bg-indigo-100 rounded-xl transition-all flex items-center justify-center shrink-0 border border-slate-200 bg-white cursor-pointer disabled:opacity-50"
+            >
+              {isUploadingImage ? (
+                <Loader2 className="w-5 h-5 text-indigo-600 animate-spin" />
+              ) : (
+                <Camera className="w-5 h-5" />
+              )}
+            </button>
+
+            <input
+              type="text"
+              required
+              value={currentMessage}
+              onChange={(e) => setCurrentMessage(e.target.value)}
+              placeholder={isUploadingImage ? "Enviando imagem..." : "Digite sua mensagem..."}
+              className="grow py-2.5 px-3.5 text-sm text-slate-800 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+            />
+
+            <button
+              type="submit"
+              disabled={isUploadingImage}
+              className="p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-md shadow-indigo-100 transition-colors flex items-center justify-center shrink-0 cursor-pointer disabled:opacity-50"
+            >
+              <Send className="w-4 h-4" />
+            </button>
+          </form>
+          {isUploadingImage && (
+            <p className="text-[11px] text-indigo-600 font-medium mt-1 flex items-center gap-1 px-1">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              <span>Hospedando foto no ImgBB... Aguarde.</span>
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Modal Visualizador de Imagem Ampliada */}
+      {previewImageUrl && (
+        <div 
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onClick={() => setPreviewImageUrl(null)}
+        >
+          <div 
+            className="relative max-w-3xl max-h-[90vh] bg-slate-900 rounded-2xl overflow-hidden shadow-2xl flex flex-col items-center"
+            onClick={(e) => e.stopPropagation()}
           >
-            <Send className="w-4 h-4" />
-          </button>
-        </form>
+            <div className="w-full p-3 bg-slate-950 flex items-center justify-between text-white text-xs border-b border-slate-800">
+              <span className="font-semibold flex items-center gap-1.5">
+                <ImageIcon className="w-4 h-4 text-indigo-400" />
+                <span>Foto em Alta Resolução</span>
+              </span>
+              <div className="flex items-center gap-2">
+                <a
+                  href={previewImageUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-300 hover:text-white transition-colors"
+                  title="Abrir imagem original"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setPreviewImageUrl(null)}
+                  className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-300 hover:text-white transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+            <div className="p-2 flex items-center justify-center bg-black/50 overflow-auto max-h-[80vh]">
+              <img
+                src={previewImageUrl}
+                alt="Foto em tela cheia"
+                referrerPolicy="no-referrer"
+                className="max-h-[75vh] max-w-full object-contain rounded-lg shadow-lg"
+              />
+            </div>
+          </div>
+        </div>
       )}
 
     </div>

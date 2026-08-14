@@ -127,6 +127,9 @@
         "text": {
           "type": "string"
         },
+        "imageUrl": {
+          "type": "string"
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time"
@@ -157,6 +160,53 @@
         }
       },
       "required": ["id", "month", "totalServiceCount"]
+    },
+    "Lead": {
+      "title": "Lead",
+      "description": "Saved customer contact and phone for marketing & promotional broadcasts",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "companyId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "phone": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "firstContactAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "lastContactAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "totalContactsCount": {
+          "type": "number"
+        },
+        "lastMessage": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "contacted", "converted", "unsubscribed"]
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": ["id", "companyId", "name", "phone", "firstContactAt"]
     }
   },
   "firestore": {
@@ -175,6 +225,10 @@
     "/companies/{companyId}/chats/{chatId}/messages/{messageId}": {
       "schema": "Message",
       "description": "Real-time communication messages list"
+    },
+    "/companies/{companyId}/leads/{leadId}": {
+      "schema": "Lead",
+      "description": "Customer contacts saved for promotional broadcasts and campaigns"
     },
     "/companies/{companyId}/reports/{reportId}": {
       "schema": "Report",

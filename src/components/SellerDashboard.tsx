@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { collection, onSnapshot, query, orderBy, doc, updateDoc, addDoc, getDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, sanitizeFirestoreData } from '../lib/firebase';
+import { uploadToImgBB } from '../lib/imgbb';
 import { Chat, User, Message, ChatStatus, Company } from '../types';
 import { crmAlarm } from '../lib/audio';
 import { 
   MessageSquare, User as UserIcon, Send, LogOut, Phone, ShieldClose, 
-  Volume2, VolumeX, Sparkles, Copy, Check, CheckSquare 
+  Volume2, VolumeX, Sparkles, Copy, Check, CheckSquare,
+  Image as ImageIcon, Camera, Loader2, ExternalLink, X
 } from 'lucide-react';
 
 interface SellerDashboardProps {
@@ -22,6 +24,12 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
   const [currentResponse, setCurrentResponse] = useState('');
   const [alarmIsSounding, setAlarmIsSounding] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
+
+  // Image Upload State
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   // Keep a synced ref of chats to prevent re-subscriptions in dependent effects
   const chatsRef = useRef<Chat[]>([]);
@@ -248,6 +256,62 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
       }));
     } catch (err) {
       console.error("Erro ao enviar mensagem:", err);
+    }
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !selectedChatId) return;
+
+    if (!file.type.startsWith('image/')) {
+      setUploadError('Por favor selecione um arquivo de imagem válido (JPG, PNG, WEBP).');
+      setTimeout(() => setUploadError(null), 4000);
+      return;
+    }
+
+    if (file.size > 15 * 1024 * 1024) {
+      setUploadError('A imagem deve ter no máximo 15MB.');
+      setTimeout(() => setUploadError(null), 4000);
+      return;
+    }
+
+    setIsUploadingImage(true);
+    setUploadError(null);
+
+    try {
+      // Upload directly to ImgBB (hosted outside database)
+      const imageUrl = await uploadToImgBB(file);
+
+      // Save message in Firestore with image URL only
+      const messagesRef = collection(db, 'companies', companyId, 'chats', selectedChatId, 'messages');
+      await addDoc(messagesRef, sanitizeFirestoreData({
+        chatId: selectedChatId,
+        companyId,
+        senderType: 'seller',
+        senderName: sellerUser.name,
+        text: '📷 Foto do produto enviada',
+        imageUrl,
+        createdAt: new Date().toISOString()
+      }));
+
+      const chatDocRef = doc(db, 'companies', companyId, 'chats', selectedChatId);
+      await updateDoc(chatDocRef, sanitizeFirestoreData({
+        lastMessage: '📷 Foto',
+        lastMessageAt: new Date().toISOString(),
+        lastMessageSender: 'seller',
+        unreadByClient: true,
+        unreadBySeller: false,
+        updatedAt: new Date().toISOString()
+      }));
+    } catch (err) {
+      console.error("Erro ao enviar imagem pelo vendedor:", err);
+      setUploadError(err instanceof Error ? err.message : 'Erro ao enviar imagem ao ImgBB.');
+      setTimeout(() => setUploadError(null), 4000);
+    } finally {
+      setIsUploadingImage(false);
+      if (imageInputRef.current) {
+        imageInputRef.current.value = '';
+      }
     }
   };
 
@@ -493,6 +557,7 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
                 {selectedChatMessages.map((m) => {
                   const isSystem = m.senderName === 'Sistema';
                   const isSeller = m.senderType === 'seller';
+                  const hasImage = !!m.imageUrl;
                   
                   if (isSystem) {
                     return (
@@ -511,19 +576,53 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
                         {isSeller ? 'Você' : m.senderName}
                       </span>
                       <div
-                        className={`max-w-[85%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${
+                        className={`max-w-[85%] rounded-2xl text-sm leading-relaxed overflow-hidden ${
                           isSeller
                             ? 'bg-slate-800 text-slate-100 rounded-tr-none border border-slate-800 shadow-md shadow-slate-100'
                             : 'bg-indigo-50 text-slate-900 rounded-tl-none border border-indigo-100 shadow-sm'
-                        }`}
+                        } ${hasImage ? 'p-2' : 'px-4 py-2.5'}`}
                       >
-                        {m.text}
+                        {hasImage && (
+                          <div className="space-y-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setPreviewImageUrl(m.imageUrl || null)}
+                              className="block overflow-hidden rounded-xl bg-black/10 relative group cursor-pointer"
+                              title="Clique para ampliar a imagem"
+                            >
+                              <img
+                                src={m.imageUrl}
+                                alt="Imagem enviada"
+                                referrerPolicy="no-referrer"
+                                className="w-full max-h-64 object-cover rounded-xl transition-transform group-hover:scale-102"
+                              />
+                              <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-xs font-semibold gap-1">
+                                <ExternalLink className="w-3.5 h-3.5" />
+                                <span>Ampliar</span>
+                              </div>
+                            </button>
+                            {m.text && m.text !== '📷 Foto enviada' && m.text !== '📷 Foto' && m.text !== '📷 Foto do produto enviada' && (
+                              <p className="px-2 py-1 text-xs">{m.text}</p>
+                            )}
+                          </div>
+                        )}
+                        {!hasImage && m.text}
                       </div>
                     </div>
                   );
                 })}
                 <div ref={bottomRef} />
               </div>
+
+              {/* Upload error banner */}
+              {uploadError && (
+                <div className="bg-rose-50 border-t border-rose-200 text-rose-800 text-xs px-4 py-2 flex items-center justify-between">
+                  <span>⚠️ {uploadError}</span>
+                  <button onClick={() => setUploadError(null)} className="text-rose-500 hover:text-rose-700 font-bold">
+                    Dispensar
+                  </button>
+                </div>
+              )}
 
               {/* Quick Template Answers and Field response inputs */}
               <div className="p-4 bg-slate-50 border-t border-slate-200 shrink-0 space-y-3">
@@ -545,22 +644,54 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
                   ))}
                 </div>
 
-                <form onSubmit={handleSendResponse} className="flex items-center gap-3">
+                <form onSubmit={handleSendResponse} className="flex items-center gap-2">
+                  {/* Hidden File Input for ImgBB Upload */}
+                  <input
+                    type="file"
+                    ref={imageInputRef}
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleImageUpload}
+                    disabled={isUploadingImage}
+                  />
+
+                  {/* Camera / Image Upload Button */}
+                  <button
+                    type="button"
+                    disabled={isUploadingImage}
+                    onClick={() => imageInputRef.current?.click()}
+                    title="Enviar foto do produto (hospedada no ImgBB)"
+                    className="p-2.5 text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 active:bg-indigo-100 rounded-xl transition-all flex items-center justify-center shrink-0 border border-slate-200 bg-white cursor-pointer disabled:opacity-50"
+                  >
+                    {isUploadingImage ? (
+                      <Loader2 className="w-5 h-5 text-indigo-600 animate-spin" />
+                    ) : (
+                      <Camera className="w-5 h-5" />
+                    )}
+                  </button>
+
                   <input
                     type="text"
                     required
                     value={currentResponse}
                     onChange={(e) => setCurrentResponse(e.target.value)}
-                    placeholder="Escreva sua resposta de atendimento..."
+                    placeholder={isUploadingImage ? "Enviando imagem ao ImgBB..." : "Escreva sua resposta de atendimento..."}
                     className="grow py-2.5 px-4 text-sm text-slate-800 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
                   />
                   <button
                     type="submit"
-                    className="p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-md shadow-indigo-100 transition-colors flex items-center justify-center shrink-0 cursor-pointer"
+                    disabled={isUploadingImage}
+                    className="p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-md shadow-indigo-100 transition-colors flex items-center justify-center shrink-0 cursor-pointer disabled:opacity-50"
                   >
                     <Send className="w-4 h-4" />
                   </button>
                 </form>
+                {isUploadingImage && (
+                  <p className="text-[11px] text-indigo-600 font-medium flex items-center gap-1">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    <span>Hospedando foto no ImgBB... Aguarde.</span>
+                  </p>
+                )}
               </div>
 
             </div>
@@ -579,6 +710,52 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
         </div>
 
       </div>
+
+      {/* Modal Visualizador de Imagem Ampliada */}
+      {previewImageUrl && (
+        <div 
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onClick={() => setPreviewImageUrl(null)}
+        >
+          <div 
+            className="relative max-w-3xl max-h-[90vh] bg-slate-900 rounded-2xl overflow-hidden shadow-2xl flex flex-col items-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-full p-3 bg-slate-950 flex items-center justify-between text-white text-xs border-b border-slate-800">
+              <span className="font-semibold flex items-center gap-1.5">
+                <ImageIcon className="w-4 h-4 text-indigo-400" />
+                <span>Visualização da Imagem</span>
+              </span>
+              <div className="flex items-center gap-2">
+                <a
+                  href={previewImageUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-300 hover:text-white transition-colors"
+                  title="Abrir no navegador"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setPreviewImageUrl(null)}
+                  className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-300 hover:text-white transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+            <div className="p-2 flex items-center justify-center bg-black/50 overflow-auto max-h-[80vh]">
+              <img
+                src={previewImageUrl}
+                alt="Foto em tela cheia"
+                referrerPolicy="no-referrer"
+                className="max-h-[75vh] max-w-full object-contain rounded-lg shadow-lg"
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );
