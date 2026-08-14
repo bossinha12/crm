@@ -911,6 +911,7 @@ export default function SuperAdminDashboard({
 
               const clientUrl = `${baseUrl}/?empresa=${slug}&view=client`;
               const loginUrl = `${baseUrl}/?empresa=${slug}&view=login`;
+              const ownerUrl = `${baseUrl}/?empresa=${slug}&view=login&role=gerente`;
 
               return (
                 <div 
@@ -997,14 +998,24 @@ export default function SuperAdminDashboard({
                       <span>Chat Cliente</span>
                     </button>
 
-                    {/* Copy Link Login Funcionários */}
+                    {/* Copy Link Login Vendedor */}
                     <button
                       onClick={() => copyToClipboard(loginUrl, `login_${comp.id}`)}
-                      title="Copiar Link de Login para Vendedores e Dono"
+                      title="Copiar Link de Login para os Vendedores"
                       className="px-3 py-2 bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
                     >
                       {copiedKey === `login_${comp.id}` ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-amber-400" />}
                       <span>Login Vendedor</span>
+                    </button>
+
+                    {/* Copy Link Login Dono / Gerente */}
+                    <button
+                      onClick={() => copyToClipboard(ownerUrl, `owner_${comp.id}`)}
+                      title="Copiar Link Exclusivo do Gerente / Dono da Loja"
+                      className="px-3 py-2 bg-slate-950 hover:bg-slate-800 border border-slate-800 text-purple-300 hover:text-purple-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
+                    >
+                      {copiedKey === `owner_${comp.id}` ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-purple-400" />}
+                      <span>Login Dono</span>
                     </button>
 
                     {/* Quick Button: +30 Dias (Renovar Mensalidade) */}

@@ -19,13 +19,26 @@ const sanitizeInput = (text: string) => {
 };
 
 export default function LoginScreen({ companyId, company, onLoginSuccess }: LoginScreenProps) {
-  const [username, setUsername] = useState('');
+  const configuredAdminName = company?.adminName || (companyId === 'atendepro_default' ? 'Larissa' : 'Administrador');
+  const configuredAdminPass = company?.adminPassword || '13259898';
+
+  const isOwnerMode = (() => {
+    const params = new URLSearchParams(window.location.search);
+    const r = (params.get('role') || params.get('tipo') || '').toLowerCase();
+    return r === 'gerente' || r === 'dono' || r === 'admin' || r === 'master';
+  })();
+
+  const [username, setUsername] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    const r = (params.get('role') || params.get('tipo') || '').toLowerCase();
+    if (r === 'gerente' || r === 'dono' || r === 'admin' || r === 'master') {
+      return configuredAdminName;
+    }
+    return '';
+  });
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const configuredAdminName = company?.adminName || (companyId === 'atendepro_default' ? 'Larissa' : 'Administrador');
-  const configuredAdminPass = company?.adminPassword || '13259898';
 
   // Synchronously initialize sellers list from cache to prevent UI pop-in / trembling
   const [availableSellers, setAvailableSellers] = useState<User[]>(() => {
@@ -279,7 +292,9 @@ export default function LoginScreen({ companyId, company, onLoginSuccess }: Logi
           </div>
           <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-800 tracking-tight">{companyName}</h2>
           <p className="mt-1.5 text-xs sm:text-sm text-slate-500">
-            Atendimento Online • Portal de Vendedores e Gerente
+            {isOwnerMode 
+              ? 'Atendimento Online • Acesso do Gerente / Dono da Loja'
+              : 'Atendimento Online • Portal de Vendedores e Gerente'}
           </p>
         </div>
 
@@ -294,28 +309,6 @@ export default function LoginScreen({ companyId, company, onLoginSuccess }: Logi
 
         <form className="mt-6 space-y-5" onSubmit={handleLogin}>
           <div className="space-y-4">
-            
-            {/* Direct selector for registered salesmen if any, helper */}
-            {availableSellers.length > 1 && (
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
-                  Vendedores Cadastrados (Atalhos)
-                </label>
-                <select
-                  onChange={(e) => setUsername(e.target.value)}
-                  className="block w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-700 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
-                  defaultValue=""
-                >
-                  <option value="">-- Selecione ou digite manualmente --</option>
-                  {availableSellers.map((s) => (
-                    <option key={s.id} value={s.name}>
-                      {s.name} ({s.role === 'admin' ? 'Master' : 'Vendedor'})
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
             <div>
               <label htmlFor="username" className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">
                 Nome do Usuário
