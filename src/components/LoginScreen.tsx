@@ -25,9 +25,9 @@ export default function LoginScreen({ companyId, company, onLoginSuccess }: Logi
   const [error, setError] = useState<string | null>(null);
   const [availableSellers, setAvailableSellers] = useState<User[]>([]);
 
-  const companyName = company?.name || 'Larissa Móveis';
-  const companyLogo = company?.logoUrl || 'https://i.postimg.cc/8CdttXNK/Whats-App-Image-2026-06-10-at-14-30-14.jpg';
-  const configuredAdminName = company?.adminName || 'Larissa';
+  const companyName = company?.name || (companyId === 'atendepro_default' ? 'Larissa Móveis' : 'Portal de Atendimento');
+  const companyLogo = company?.logoUrl || (companyId === 'atendepro_default' ? 'https://i.postimg.cc/8CdttXNK/Whats-App-Image-2026-06-10-at-14-30-14.jpg' : '');
+  const configuredAdminName = company?.adminName || (companyId === 'atendepro_default' ? 'Larissa' : 'Administrador');
   const configuredAdminPass = company?.adminPassword || '13259898';
 
   // Listen to registered employees in real-time to make login select options or quick selections available instantly
@@ -274,8 +274,14 @@ export default function LoginScreen({ companyId, company, onLoginSuccess }: Logi
         
         {/* Branding Title */}
         <div className="text-center">
-          <div className="mx-auto h-24 w-24 rounded-full border border-slate-150 overflow-hidden shadow-md mb-4 bg-white flex items-center justify-center">
-            <img src={companyLogo} referrerPolicy="no-referrer" alt={`${companyName} Logo`} className="w-full h-full object-cover" />
+          <div className="mx-auto h-24 w-24 rounded-full border border-slate-200 overflow-hidden shadow-md mb-4 bg-slate-50 flex items-center justify-center">
+            {companyLogo ? (
+              <img src={companyLogo} referrerPolicy="no-referrer" alt={`${companyName} Logo`} className="w-full h-full object-cover" />
+            ) : (
+              <span className="text-3xl font-black text-indigo-600 tracking-tight">
+                {companyName.slice(0, 2).toUpperCase()}
+              </span>
+            )}
           </div>
           <h2 className="text-3xl font-extrabold text-slate-800 tracking-tight">{companyName}</h2>
           <p className="mt-2 text-sm text-slate-500">

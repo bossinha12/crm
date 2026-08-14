@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, setDoc, onSnapshot, collection } from 'firebase/firestore';
 import { db, auth, testFirestoreConnection } from './lib/firebase';
 import { signInAnonymously } from 'firebase/auth';
 import { User, Company } from './types';
@@ -15,13 +15,22 @@ import {
 
 export default function App() {
   // Parse company and view from URL query parameters
-  const [companyId, setCompanyId] = useState<string>(() => {
+  const getCompanyIdentifierFromUrl = (): string => {
     const params = new URLSearchParams(window.location.search);
-    const customCompany = params.get('company') || params.get('c');
-    return customCompany ? customCompany.trim() : 'atendepro_default';
+    const custom = params.get('empresa') || 
+                   params.get('company') || 
+                   params.get('e') || 
+                   params.get('c') || 
+                   params.get('slug');
+    return custom ? custom.trim() : 'atendepro_default';
+  };
+
+  const [companyId, setCompanyId] = useState<string>(() => {
+    return getCompanyIdentifierFromUrl();
   });
 
   const [company, setCompany] = useState<Company | null>(null);
+  const [allCompaniesList, setAllCompaniesList] = useState<Company[]>([]);
   const [isSuperAdminView, setIsSuperAdminView] = useState<boolean>(() => {
     const params = new URLSearchParams(window.location.search);
     const hash = window.location.hash.toLowerCase();
@@ -32,7 +41,9 @@ export default function App() {
   });
 
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    const saved = localStorage.getItem(`crm_current_user_${companyId}`) || localStorage.getItem('crm_current_user_atendepro');
+    const activeId = getCompanyIdentifierFromUrl();
+    const saved = localStorage.getItem(`crm_current_user_${activeId}`) || 
+                  localStorage.getItem('crm_current_user_atendepro');
     if (saved) {
       try {
         return JSON.parse(saved);
@@ -67,7 +78,12 @@ export default function App() {
                       viewParam === 'superadmin' || 
                       hash.includes('superadmin');
       
-      const customCompany = params.get('company') || params.get('c');
+      const customCompany = params.get('empresa') || 
+                            params.get('company') || 
+                            params.get('e') || 
+                            params.get('c') || 
+                            params.get('slug');
+
       if (customCompany && customCompany.trim() !== companyId) {
         setCompanyId(customCompany.trim());
       }
@@ -97,18 +113,29 @@ export default function App() {
     };
   }, [companyId]);
 
-  // Dynamically update document title based on active view and company
+  // Dynamically update document title and favicon based on active company
   useEffect(() => {
     if (isSuperAdminView) {
       document.title = 'Painel de Licenças | Gestão de Empresas';
     } else if (company?.name) {
       document.title = `${company.name} - Atendimento Online`;
+      
+      // Update or create favicon
+      if (company.logoUrl) {
+        let link: HTMLLinkElement | null = document.querySelector("link[rel*='icon']");
+        if (!link) {
+          link = document.createElement('link');
+          link.rel = 'shortcut icon';
+          document.getElementsByTagName('head')[0].appendChild(link);
+        }
+        link.href = company.logoUrl;
+      }
     }
-  }, [isSuperAdminView, company?.name]);
+  }, [isSuperAdminView, company?.name, company?.logoUrl]);
 
-  // Initialize Firebase Auth & Real-Time Company Document Listener
+  // Initialize Firebase Auth & Real-Time Companies Collection Listener
   useEffect(() => {
-    let unsubscribeCompany: (() => void) | null = null;
+    let unsubscribeCompanies: (() => void) | null = null;
 
     async function bootstrapCompany() {
       try {
@@ -120,63 +147,158 @@ export default function App() {
         }
 
         await testFirestoreConnection();
-        const companyDocRef = doc(db, 'companies', companyId);
 
-        // Real-time snapshot to ensure instant updates for block/unblock and logo changes
-        unsubscribeCompany = onSnapshot(companyDocRef, (snapshot) => {
-          if (snapshot.exists()) {
-            setCompany({ id: snapshot.id, ...snapshot.data() } as Company);
+        // Listen to companies collection in real time
+        const companiesColRef = collection(db, 'companies');
+        unsubscribeCompanies = onSnapshot(companiesColRef, (snapshot) => {
+          const fetchedCompanies: Company[] = [];
+          snapshot.forEach((d) => {
+            fetchedCompanies.push({ id: d.id, ...d.data() } as Company);
+          });
+
+          setAllCompaniesList(fetchedCompanies);
+
+          const targetParam = getCompanyIdentifierFromUrl().toLowerCase();
+          
+          // Match company by slug, exact ID, or company_{slug}
+          let matched = fetchedCompanies.find(c => {
+            const idLower = (c.id || '').toLowerCase();
+            const slugLower = (c.slug || '').toLowerCase();
+            return slugLower === targetParam ||
+                   idLower === targetParam ||
+                   idLower === `company_${targetParam}` ||
+                   `company_${slugLower}` === targetParam ||
+                   (targetParam === 'larissamoveis' && (idLower === 'atendepro_default' || slugLower === 'larissamoveis')) ||
+                   (targetParam === 'atendepro_default' && idLower === 'atendepro_default');
+          });
+
+          // Check fallback in localStorage
+          if (!matched) {
+            const savedLocal = localStorage.getItem('crm_local_companies');
+            if (savedLocal) {
+              try {
+                const parsed = JSON.parse(savedLocal) as Company[];
+                matched = parsed.find(c => {
+                  const idLower = (c.id || '').toLowerCase();
+                  const slugLower = (c.slug || '').toLowerCase();
+                  return slugLower === targetParam ||
+                         idLower === targetParam ||
+                         idLower === `company_${targetParam}` ||
+                         `company_${slugLower}` === targetParam;
+                });
+              } catch (e) {}
+            }
+          }
+
+          if (matched) {
+            setCompany(matched);
+            setCompanyId(matched.id);
           } else {
-            // Auto create default shop metadata if it's the primary default company
-            const defaultCompany: Company = {
-              id: companyId,
-              name: companyId === 'atendepro_default' ? 'Larissa Móveis' : companyId,
-              logoUrl: companyId === 'atendepro_default' ? 'https://i.postimg.cc/8CdttXNK/Whats-App-Image-2026-06-10-at-14-30-14.jpg' : undefined,
+            // If target is default
+            if (targetParam === 'atendepro_default' || targetParam === 'larissamoveis') {
+              const defaultCompany: Company = {
+                id: 'atendepro_default',
+                name: 'Larissa Móveis',
+                slug: 'larissamoveis',
+                logoUrl: 'https://i.postimg.cc/8CdttXNK/Whats-App-Image-2026-06-10-at-14-30-14.jpg',
+                adminName: 'Larissa',
+                adminPassword: '13259898',
+                license: {
+                  status: 'active',
+                  planName: 'Plano Pro Vitalício',
+                  monthlyPrice: 0,
+                  isLifetime: true
+                },
+                createdAt: new Date().toISOString()
+              };
+              setDoc(doc(db, 'companies', 'atendepro_default'), defaultCompany).catch(console.warn);
+              setCompany(defaultCompany);
+              setCompanyId('atendepro_default');
+            } else {
+              // Custom company not yet in cloud collection, create clean isolated profile
+              const cleanSlug = targetParam.replace(/^company_/, '');
+              const formattedName = cleanSlug.replace(/[-_]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+              const dynamicCompany: Company = {
+                id: targetParam.startsWith('company_') ? targetParam : `company_${targetParam}`,
+                name: formattedName,
+                slug: cleanSlug,
+                adminName: 'Administrador',
+                adminPassword: '13259898',
+                license: {
+                  status: 'active',
+                  planName: 'Plano Mensal',
+                  monthlyPrice: 149
+                },
+                createdAt: new Date().toISOString()
+              };
+              setCompany(dynamicCompany);
+              setCompanyId(dynamicCompany.id);
+            }
+          }
+
+          setConnecting(false);
+        }, (err) => {
+          console.warn("Utilizando fallback local para empresas:", err);
+          const targetParam = getCompanyIdentifierFromUrl().toLowerCase();
+          const savedLocal = localStorage.getItem('crm_local_companies');
+          let matched: Company | undefined;
+          if (savedLocal) {
+            try {
+              const parsed = JSON.parse(savedLocal) as Company[];
+              matched = parsed.find(c => {
+                const idLower = (c.id || '').toLowerCase();
+                const slugLower = (c.slug || '').toLowerCase();
+                return slugLower === targetParam ||
+                       idLower === targetParam ||
+                       idLower === `company_${targetParam}` ||
+                       `company_${slugLower}` === targetParam;
+              });
+            } catch (e) {}
+          }
+
+          if (matched) {
+            setCompany(matched);
+            setCompanyId(matched.id);
+          } else if (targetParam === 'atendepro_default' || targetParam === 'larissamoveis') {
+            setCompany({
+              id: 'atendepro_default',
+              name: 'Larissa Móveis',
+              slug: 'larissamoveis',
+              logoUrl: 'https://i.postimg.cc/8CdttXNK/Whats-App-Image-2026-06-10-at-14-30-14.jpg',
               adminName: 'Larissa',
               adminPassword: '13259898',
               license: {
                 status: 'active',
                 planName: 'Plano Pro Vitalício',
-                monthlyPrice: 0
+                monthlyPrice: 0,
+                isLifetime: true
               },
               createdAt: new Date().toISOString()
-            };
-            setDoc(companyDocRef, defaultCompany).catch(console.warn);
-            setCompany(defaultCompany);
+            });
+            setCompanyId('atendepro_default');
+          } else {
+            const cleanSlug = targetParam.replace(/^company_/, '');
+            const formattedName = cleanSlug.replace(/[-_]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            setCompany({
+              id: `company_${cleanSlug}`,
+              name: formattedName,
+              slug: cleanSlug,
+              adminName: 'Administrador',
+              adminPassword: '13259898',
+              license: {
+                status: 'active',
+                planName: 'Plano Mensal',
+                monthlyPrice: 149
+              },
+              createdAt: new Date().toISOString()
+            });
+            setCompanyId(`company_${cleanSlug}`);
           }
-          setConnecting(false);
-        }, (err) => {
-          console.warn("Utilizando fallback local para a empresa:", err);
-          setCompany({
-            id: companyId,
-            name: companyId === 'atendepro_default' ? 'Larissa Móveis' : companyId,
-            logoUrl: companyId === 'atendepro_default' ? 'https://i.postimg.cc/8CdttXNK/Whats-App-Image-2026-06-10-at-14-30-14.jpg' : undefined,
-            adminName: 'Larissa',
-            adminPassword: '13259898',
-            license: {
-              status: 'active',
-              planName: 'Plano Pro Vitalício',
-              monthlyPrice: 0
-            },
-            createdAt: new Date().toISOString()
-          });
           setConnecting(false);
         });
 
       } catch (err) {
-        console.warn("Falha de conexão com Firestore:", err);
-        setCompany({
-          id: companyId,
-          name: companyId === 'atendepro_default' ? 'Larissa Móveis' : companyId,
-          adminName: 'Larissa',
-          adminPassword: '13259898',
-          license: {
-            status: 'active',
-            planName: 'Plano Pro Vitalício',
-            monthlyPrice: 0
-          },
-          createdAt: new Date().toISOString()
-        });
+        console.warn("Falha de inicialização:", err);
         setConnecting(false);
       }
     }
@@ -184,7 +306,7 @@ export default function App() {
     bootstrapCompany();
 
     return () => {
-      if (unsubscribeCompany) unsubscribeCompany();
+      if (unsubscribeCompanies) unsubscribeCompanies();
     };
   }, [companyId]);
 
@@ -205,13 +327,21 @@ export default function App() {
       <SuperAdminDashboard 
         currentCompanyId={companyId}
         onSelectCompany={(selectedId) => {
+          const selectedComp = allCompaniesList.find(c => c.id === selectedId);
+          const slug = selectedComp?.slug || selectedId.replace(/^company_/, '');
           setCompanyId(selectedId);
+          if (selectedComp) setCompany(selectedComp);
           const params = new URLSearchParams(window.location.search);
           if (selectedId === 'atendepro_default') {
+            params.delete('empresa');
             params.delete('company');
             params.delete('c');
+            params.delete('slug');
           } else {
-            params.set('company', selectedId);
+            params.set('empresa', slug);
+            params.delete('company');
+            params.delete('c');
+            params.delete('slug');
           }
           params.delete('view');
           params.delete('superadmin');
@@ -263,8 +393,8 @@ export default function App() {
     );
   }
 
-  const currentCompanyName = company?.name || 'Larissa Móveis';
-  const currentCompanyLogo = company?.logoUrl || 'https://i.postimg.cc/8CdttXNK/Whats-App-Image-2026-06-10-at-14-30-14.jpg';
+  const currentCompanyName = company?.name || (companyId === 'atendepro_default' ? 'Larissa Móveis' : 'Atendimento Online');
+  const currentCompanyLogo = company?.logoUrl || (companyId === 'atendepro_default' ? 'https://i.postimg.cc/8CdttXNK/Whats-App-Image-2026-06-10-at-14-30-14.jpg' : '');
 
   // 3. Render Logged-In CRM consoles (Master or Seller)
   if (currentUser) {
@@ -381,7 +511,13 @@ export default function App() {
         {/* Title branding heading block */}
         <div className="space-y-4">
           <div className="mx-auto w-20 h-20 rounded-full border border-slate-200 overflow-hidden shadow-lg bg-white flex items-center justify-center mb-2">
-            <img src={currentCompanyLogo} referrerPolicy="no-referrer" alt={`${currentCompanyName} Logo`} className="w-full h-full object-cover" />
+            {currentCompanyLogo ? (
+              <img src={currentCompanyLogo} referrerPolicy="no-referrer" alt={`${currentCompanyName} Logo`} className="w-full h-full object-cover" />
+            ) : (
+              <span className="text-2xl font-black text-indigo-600">
+                {currentCompanyName.slice(0, 2).toUpperCase()}
+              </span>
+            )}
           </div>
           <h1 className="text-4xl sm:text-5xl font-extrabold text-slate-900 tracking-tight text-balance">
             {currentCompanyName} <span className="text-indigo-600 block sm:inline">Atendimento Online</span>

@@ -456,7 +456,13 @@ export default function ClientWidget({ companyId, companyName, companyLogo, onGo
             <MessageSquare className="w-24 h-24" />
           </div>
           <div className="w-16 h-16 rounded-full border border-white/20 overflow-hidden shrink-0 bg-white shadow-inner flex items-center justify-center">
-            <img src={companyLogo || 'https://i.postimg.cc/8CdttXNK/Whats-App-Image-2026-06-10-at-14-30-14.jpg'} referrerPolicy="no-referrer" alt={`${companyName} Logo`} className="w-full h-full object-cover" />
+            {companyLogo ? (
+              <img src={companyLogo} referrerPolicy="no-referrer" alt={`${companyName} Logo`} className="w-full h-full object-cover" />
+            ) : (
+              <span className="text-2xl font-black text-indigo-600">
+                {companyName.slice(0, 2).toUpperCase()}
+              </span>
+            )}
           </div>
           <div className="relative z-10 text-center sm:text-left">
             <p className="text-indigo-100 text-xs font-semibold uppercase tracking-wider">Suporte Ao Vivo</p>
