@@ -207,6 +207,49 @@
         }
       },
       "required": ["id", "companyId", "name", "phone", "firstContactAt"]
+    },
+    "InternalMessage": {
+      "title": "InternalMessage",
+      "description": "Internal direct messages and team announcements between Owner/Admin and Sellers",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "companyId": {
+          "type": "string"
+        },
+        "senderId": {
+          "type": "string"
+        },
+        "senderName": {
+          "type": "string"
+        },
+        "senderRole": {
+          "type": "string",
+          "enum": ["admin", "seller"]
+        },
+        "recipientId": {
+          "type": "string"
+        },
+        "recipientName": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "imageUrl": {
+          "type": "string"
+        },
+        "readBy": {
+          "type": "array"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "companyId", "senderId", "senderRole", "recipientId", "text", "createdAt"]
     }
   },
   "firestore": {
@@ -233,6 +276,10 @@
     "/companies/{companyId}/reports/{reportId}": {
       "schema": "Report",
       "description": "Preserved monthly metrics for download"
+    },
+    "/companies/{companyId}/internal_messages/{messageId}": {
+      "schema": "InternalMessage",
+      "description": "Direct messages and notices between Management and Sales staff"
     }
   }
 }

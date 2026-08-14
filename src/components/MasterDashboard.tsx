@@ -8,8 +8,9 @@ import {
 import { 
   Users, UserPlus, FileText, Eye, Key, LogOut, Trash2, 
   TrendingUp, TrendingDown, ClipboardList, ShieldAlert, CheckCircle, Lock, Sparkles,
-  Phone, Megaphone, Download, Copy, Check, Search, Plus, MessageCircle, ExternalLink, RefreshCw, X, Send
+  Phone, Megaphone, Download, Copy, Check, Search, Plus, MessageCircle, MessageSquare, ExternalLink, RefreshCw, X, Send
 } from 'lucide-react';
+import InternalTeamChat from './InternalTeamChat';
 
 interface MasterDashboardProps {
   companyId: string;
@@ -38,8 +39,10 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
   const [mirroredMessages, setMirroredMessages] = useState<Message[]>([]);
   const mirrorEndRef = useRef<HTMLDivElement>(null);
 
-  // Active Menu Tabs: 'analytics' | 'sellers' | 'live-feeds' | 'leads'
-  const [activeTab, setActiveTab] = useState<'analytics' | 'sellers' | 'live-feeds' | 'leads'>('analytics');
+  // Active Menu Tabs: 'analytics' | 'sellers' | 'live-feeds' | 'leads' | 'internal-chat'
+  const [activeTab, setActiveTab] = useState<'analytics' | 'sellers' | 'live-feeds' | 'leads' | 'internal-chat'>('analytics');
+  const [selectedSellerForDirectChat, setSelectedSellerForDirectChat] = useState<string | null>(null);
+  const [unreadInternalCount, setUnreadInternalCount] = useState<number>(0);
   const [isClearing, setIsClearing] = useState(false);
   const [oldAndClosedChats, setOldAndClosedChats] = useState<Chat[]>([]);
   const [showClosedChats, setShowClosedChats] = useState(false);
@@ -295,6 +298,26 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
 
     return () => unsubLeads();
   }, [companyId, chats]);
+
+  // Load unread internal team messages for the Admin
+  useEffect(() => {
+    const internalCol = collection(db, 'companies', companyId, 'internal_messages');
+    const unsubInternal = onSnapshot(internalCol, (snapshot) => {
+      let unread = 0;
+      snapshot.forEach((d) => {
+        const data = d.data();
+        // Count unread if message was sent by a seller and not read by admin yet
+        if (data.senderRole === 'seller' && (!data.readBy || !data.readBy.includes(adminUser.id))) {
+          unread++;
+        }
+      });
+      setUnreadInternalCount(unread);
+    }, (error) => {
+      console.warn("Aviso ao carregar mensagens internas:", error);
+    });
+
+    return () => unsubInternal();
+  }, [companyId, adminUser.id]);
 
   // Promotional campaign message builder
   const updatePromoMessage = (type: 'discount' | 'new_arrivals' | 'flash_sale' | 'custom', lead: Lead) => {
@@ -1102,6 +1125,22 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
             </span>
           )}
         </button>
+        <button
+          onClick={() => { setActiveTab('internal-chat'); setMirroredChatId(null); }}
+          className={`px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
+            activeTab === 'internal-chat'
+              ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100'
+              : 'text-indigo-700 bg-indigo-50/80 hover:bg-indigo-100/80 border border-indigo-200/60'
+          }`}
+        >
+          <MessageSquare className="w-3.5 h-3.5" />
+          <span>Chat com Vendedores</span>
+          {unreadInternalCount > 0 && (
+            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-extrabold ${activeTab === 'internal-chat' ? 'bg-white text-indigo-700' : 'bg-rose-500 text-white animate-pulse'}`}>
+              {unreadInternalCount}
+            </span>
+          )}
+        </button>
       </div>
 
       {/* 30 Days Auto purging / cleaner helper banner */}
@@ -1383,18 +1422,32 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
                 {users
                   .filter(u => u.role === 'seller')
                   .map((item) => (
-                    <div key={item.id} className="p-3.5 border border-slate-100 hover:border-slate-200 rounded-xl flex items-center justify-between gap-4">
+                    <div key={item.id} className="p-3.5 border border-slate-100 hover:border-slate-200 rounded-xl flex items-center justify-between gap-3">
                       <div>
                         <p className="font-bold text-slate-800 text-sm">{item.name}</p>
                         <p className="text-xs text-slate-500 font-medium mt-0.5">Acesso Liberado • Basta digitar "{item.name}" para entrar sem senha</p>
                       </div>
-                      <button
-                        onClick={() => handleDeleteSeller(item.id, item.name)}
-                        className="p-2 border border-slate-100 text-rose-500 hover:bg-rose-50 rounded-lg hover:border-rose-100 transition-all shrink-0"
-                        title="Remover Vendedor"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedSellerForDirectChat(item.id);
+                            setActiveTab('internal-chat');
+                          }}
+                          className="px-3 py-1.5 text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-lg border border-indigo-200 flex items-center gap-1.5 transition-colors cursor-pointer"
+                          title="Enviar mensagem direta ao vendedor"
+                        >
+                          <MessageSquare className="w-3.5 h-3.5" />
+                          <span>Mensagem</span>
+                        </button>
+                        <button
+                          onClick={() => handleDeleteSeller(item.id, item.name)}
+                          className="p-2 border border-slate-100 text-rose-500 hover:bg-rose-50 rounded-lg hover:border-rose-100 transition-all shrink-0 cursor-pointer"
+                          title="Remover Vendedor"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
                   ))}
               </div>
@@ -1661,6 +1714,19 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
               </div>
             </div>
 
+          </div>
+        )}
+
+        {/* Tab 5: Internal Team & Sellers Direct Chat */}
+        {activeTab === 'internal-chat' && (
+          <div className="w-full">
+            <InternalTeamChat
+              companyId={companyId}
+              currentUser={adminUser}
+              sellers={users.filter(u => u.role === 'seller')}
+              company={company}
+              targetSellerId={selectedSellerForDirectChat}
+            />
           </div>
         )}
 

@@ -7,8 +7,9 @@ import { crmAlarm } from '../lib/audio';
 import { 
   MessageSquare, User as UserIcon, Send, LogOut, Phone, ShieldClose, 
   Volume2, VolumeX, Sparkles, Copy, Check, CheckSquare,
-  Image as ImageIcon, Camera, Loader2, ExternalLink, X
+  Image as ImageIcon, Camera, Loader2, ExternalLink, X, ShieldCheck, Megaphone
 } from 'lucide-react';
+import InternalTeamChat from './InternalTeamChat';
 
 interface SellerDashboardProps {
   companyId: string;
@@ -24,6 +25,12 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
   const [currentResponse, setCurrentResponse] = useState('');
   const [alarmIsSounding, setAlarmIsSounding] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
+
+  // Internal Direct Team Chat with Owner / Management
+  const [isInternalChatOpen, setIsInternalChatOpen] = useState(false);
+  const [unreadInternalMsgs, setUnreadInternalMsgs] = useState(0);
+  const [lastAdminNotice, setLastAdminNotice] = useState<string | null>(null);
+  const [companySellers, setCompanySellers] = useState<User[]>([]);
 
   // Image Upload State
   const [isUploadingImage, setIsUploadingImage] = useState(false);
@@ -136,6 +143,51 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
     });
     return () => unsubUser();
   }, [sellerUser.id, companyId, onLogout]);
+
+  // Load all sellers for the company context
+  useEffect(() => {
+    const usersCol = collection(db, 'companies', companyId, 'users');
+    const unsubUsers = onSnapshot(usersCol, (snapshot) => {
+      const list: User[] = [];
+      snapshot.forEach((d) => {
+        list.push({ id: d.id, ...d.data() } as User);
+      });
+      setCompanySellers(list);
+    }, (error) => {
+      console.warn("Aviso ao carregar vendedores:", error);
+    });
+
+    return () => unsubUsers();
+  }, [companyId]);
+
+  // Real-time listener for internal messages from Admin / Management to this Seller or to 'all'
+  useEffect(() => {
+    const internalCol = collection(db, 'companies', companyId, 'internal_messages');
+    const unsubInternal = onSnapshot(internalCol, (snapshot) => {
+      let unread = 0;
+      let latestNotice: string | null = null;
+
+      snapshot.forEach((d) => {
+        const data = d.data();
+        const isForMe = data.recipientId === sellerUser.id || data.recipientId === 'all';
+        const fromAdmin = data.senderRole === 'admin' || data.senderId.startsWith('admin');
+
+        if (isForMe && fromAdmin) {
+          latestNotice = data.text;
+          if (!data.readBy || !data.readBy.includes(sellerUser.id)) {
+            unread++;
+          }
+        }
+      });
+
+      setUnreadInternalMsgs(unread);
+      setLastAdminNotice(latestNotice);
+    }, (error) => {
+      console.warn("Aviso ao monitorar mensagens internas do vendedor:", error);
+    });
+
+    return () => unsubInternal();
+  }, [companyId, sellerUser.id]);
 
   // Hook to automatically unselect the active chat if it gets deleted from resources
   useEffect(() => {
@@ -426,6 +478,26 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
             )}
           </button>
 
+          {/* Internal Chat with Owner / Management Button */}
+          <button
+            type="button"
+            onClick={() => setIsInternalChatOpen(true)}
+            className={`text-xs font-bold px-3.5 py-1.5 rounded-xl flex items-center gap-2 transition-all cursor-pointer shadow-sm ${
+              unreadInternalMsgs > 0
+                ? 'bg-indigo-600 hover:bg-indigo-500 text-white animate-pulse shadow-indigo-500/30'
+                : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
+            }`}
+            title="Abrir comunicação direta com o Proprietário / Gerência"
+          >
+            <MessageSquare className="w-3.5 h-3.5 text-indigo-400" />
+            <span>Falar com Diretoria</span>
+            {unreadInternalMsgs > 0 && (
+              <span className="bg-rose-500 text-white text-[10px] font-extrabold px-1.5 py-0.5 rounded-full">
+                {unreadInternalMsgs} {unreadInternalMsgs === 1 ? 'novo' : 'novos'}
+              </span>
+            )}
+          </button>
+
           <button
             onClick={onLogout}
             className="text-xs bg-rose-950/20 hover:bg-rose-950/40 border border-rose-900/20 rounded-xl px-3.5 py-1.5 text-rose-400 flex items-center gap-1.5 font-bold transition-all"
@@ -435,6 +507,36 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
           </button>
         </div>
       </div>
+
+      {/* Internal Management Notice Banner (if there are unread messages) */}
+      {unreadInternalMsgs > 0 && (
+        <div 
+          onClick={() => setIsInternalChatOpen(true)}
+          className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl p-4 flex items-center justify-between gap-4 cursor-pointer shadow-lg shadow-indigo-500/20 transition-all border border-indigo-500"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
+              <Megaphone className="w-5 h-5 text-white animate-bounce" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] uppercase font-extrabold px-2 py-0.5 rounded bg-white/20 text-white">
+                  Aviso da Diretoria / Gerência
+                </span>
+                <span className="text-xs font-bold text-indigo-100">
+                  {unreadInternalMsgs} nova{unreadInternalMsgs > 1 ? 's' : ''} mensagem{unreadInternalMsgs > 1 ? 'ens' : ''}
+                </span>
+              </div>
+              <p className="text-xs font-medium text-white mt-0.5 line-clamp-1">
+                {lastAdminNotice || 'Você possui nova mensagem da diretoria. Clique para responder.'}
+              </p>
+            </div>
+          </div>
+          <button className="px-3.5 py-1.5 bg-white text-indigo-700 hover:bg-indigo-50 text-xs font-bold rounded-xl shrink-0 transition-colors shadow-sm">
+            Responder Agora 💬
+          </button>
+        </div>
+      )}
 
       {/* Main Grid: Left sidebar directories vs Right active conversation chat feed */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
@@ -753,6 +855,27 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
                 className="max-h-[75vh] max-w-full object-contain rounded-lg shadow-lg"
               />
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal / Dialog de Comunicação Direta com o Proprietário / Diretoria */}
+      {isInternalChatOpen && (
+        <div 
+          className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onClick={() => setIsInternalChatOpen(false)}
+        >
+          <div 
+            className="relative max-w-4xl w-full max-h-[95vh] rounded-2xl overflow-hidden shadow-2xl flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <InternalTeamChat
+              companyId={companyId}
+              currentUser={sellerUser}
+              sellers={companySellers.filter(u => u.role === 'seller')}
+              company={company}
+              onClose={() => setIsInternalChatOpen(false)}
+            />
           </div>
         </div>
       )}

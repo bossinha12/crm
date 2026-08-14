@@ -71,6 +71,20 @@ export interface Message {
   createdAt: string;
 }
 
+export interface InternalMessage {
+  id: string;
+  companyId: string;
+  senderId: string;
+  senderName: string;
+  senderRole: 'admin' | 'seller';
+  recipientId: string; // sellerId OR 'all' (announcement to all sellers) OR 'admin'
+  recipientName?: string;
+  text: string;
+  imageUrl?: string;
+  readBy?: string[]; // Array of user IDs who have seen this message
+  createdAt: string;
+}
+
 export interface Report {
   id: string;
   month: string; // e.g. "2026-06"
