@@ -81,7 +81,7 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
     'Foi um prazer lhe atender! Obrigado pela preferência e até a próxima.'
   ];
 
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const sellerMessagesContainerRef = useRef<HTMLDivElement>(null);
 
   // 1. Listen to ALL chats in real-time under this company to check new and current active assignments
   // (Index-free query with robust in-memory sorting to survive missing index errors)
@@ -242,10 +242,12 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
     return () => unsubMessages();
   }, [selectedChatId, companyId]);
 
-  // Scroll to bottom upon receiving or dispatching messages
+  // Scroll to bottom of message container upon receiving or dispatching messages safely
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [selectedChatMessages]);
+    if (sellerMessagesContainerRef.current) {
+      sellerMessagesContainerRef.current.scrollTop = sellerMessagesContainerRef.current.scrollHeight;
+    }
+  }, [selectedChatMessages.length]);
 
   // Claims a chat from unassigned index list
   const handleClaimChat = async (chat: Chat) => {
@@ -655,7 +657,7 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
               </div>
 
               {/* Messages Body */}
-              <div className="grow overflow-y-auto p-5 space-y-4" id="messages-panel">
+              <div ref={sellerMessagesContainerRef} className="grow overflow-y-auto p-5 space-y-4" id="messages-panel">
                 {selectedChatMessages.map((m) => {
                   const isSystem = m.senderName === 'Sistema';
                   const isSeller = m.senderType === 'seller';
@@ -713,7 +715,6 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
                     </div>
                   );
                 })}
-                <div ref={bottomRef} />
               </div>
 
               {/* Upload error banner */}

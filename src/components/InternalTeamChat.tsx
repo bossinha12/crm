@@ -43,7 +43,8 @@ export default function InternalTeamChat({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const chatScrollContainerRef = useRef<HTMLDivElement>(null);
+  const markedAsReadIdsRef = useRef<Set<string>>(new Set());
 
   // Sync targetSellerId when prop changes
   useEffect(() => {
@@ -85,10 +86,12 @@ export default function InternalTeamChat({
     return () => unsub();
   }, [companyId]);
 
-  // Auto-scroll when messages change or recipient changes
+  // Auto-scroll ONLY the inner chat messages box (never moving or jerking the browser window)
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, selectedRecipientId]);
+    if (chatScrollContainerRef.current) {
+      chatScrollContainerRef.current.scrollTop = chatScrollContainerRef.current.scrollHeight;
+    }
+  }, [messages.length, selectedRecipientId]);
 
   // Filter messages for current view
   const currentConversationMessages = messages.filter((m) => {
@@ -125,14 +128,16 @@ export default function InternalTeamChat({
     }).length;
   };
 
-  // Mark messages as read when viewing conversation
+  // Mark messages as read safely without re-render loop
   useEffect(() => {
     const unreadMsgs = currentConversationMessages.filter(
-      (m) => m.senderId !== currentUser.id && (!m.readBy || !m.readBy.includes(currentUser.id))
+      (m) => m.id && !markedAsReadIdsRef.current.has(m.id) && m.senderId !== currentUser.id && (!m.readBy || !m.readBy.includes(currentUser.id))
     );
 
     if (unreadMsgs.length > 0) {
       unreadMsgs.forEach(async (msg) => {
+        if (!msg.id) return;
+        markedAsReadIdsRef.current.add(msg.id);
         try {
           const docRef = doc(db, 'companies', companyId, 'internal_messages', msg.id);
           const updatedReadBy = [...(msg.readBy || []), currentUser.id];
@@ -461,7 +466,7 @@ export default function InternalTeamChat({
           )}
 
           {/* Messages Feed */}
-          <div className="grow overflow-y-auto p-4 space-y-3">
+          <div ref={chatScrollContainerRef} className="grow overflow-y-auto p-4 space-y-3">
             {currentConversationMessages.length === 0 ? (
               <div className="text-center py-16 text-slate-400 text-xs space-y-2">
                 <div className="w-12 h-12 rounded-full bg-indigo-50 text-indigo-500 mx-auto flex items-center justify-center">
@@ -536,7 +541,6 @@ export default function InternalTeamChat({
                 );
               })
             )}
-            <div ref={messagesEndRef} />
           </div>
 
           {/* Quick Prompts for Admin */}

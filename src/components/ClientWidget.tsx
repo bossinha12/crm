@@ -33,7 +33,7 @@ export default function ClientWidget({ companyId, companyName, companyLogo, onGo
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const clientMessagesContainerRef = useRef<HTMLDivElement>(null);
   const activeChatRef = useRef<Chat | null>(null);
 
   // Keep activeChatRef synced
@@ -119,10 +119,12 @@ export default function ClientWidget({ companyId, companyName, companyLogo, onGo
     };
   }, [chatId, companyId]);
 
-  // Scroll viewport down upon new messages
+  // Scroll inner chat container down safely upon new messages without moving window
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    if (clientMessagesContainerRef.current) {
+      clientMessagesContainerRef.current.scrollTop = clientMessagesContainerRef.current.scrollHeight;
+    }
+  }, [messages.length]);
 
   const handleStartChat = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -635,7 +637,7 @@ export default function ClientWidget({ companyId, companyName, companyLogo, onGo
       )}
 
       {/* Messages Scroll Area */}
-      <div className="grow overflow-y-auto p-5 space-y-4 bg-white" id="messages-stream">
+      <div ref={clientMessagesContainerRef} className="grow overflow-y-auto p-5 space-y-4 bg-white" id="messages-stream">
         
         {/* Welcome indicator */}
         <div className="text-center py-2 text-xs text-slate-400">
@@ -705,8 +707,6 @@ export default function ClientWidget({ companyId, companyName, companyLogo, onGo
             </button>
           </div>
         )}
-
-        <div ref={bottomRef} />
       </div>
 
       {/* Active Messaging input footer */}

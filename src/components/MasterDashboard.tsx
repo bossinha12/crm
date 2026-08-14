@@ -37,7 +37,7 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
   // Live Mirror session
   const [mirroredChatId, setMirroredChatId] = useState<string | null>(null);
   const [mirroredMessages, setMirroredMessages] = useState<Message[]>([]);
-  const mirrorEndRef = useRef<HTMLDivElement>(null);
+  const mirrorFeedContainerRef = useRef<HTMLDivElement>(null);
 
   // Active Menu Tabs: 'analytics' | 'sellers' | 'live-feeds' | 'leads' | 'internal-chat'
   const [activeTab, setActiveTab] = useState<'analytics' | 'sellers' | 'live-feeds' | 'leads' | 'internal-chat'>('analytics');
@@ -219,9 +219,11 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
     return () => unsubMirror();
   }, [mirroredChatId, companyId]);
 
-  // Keep mirror feed scrolled down
+  // Keep mirror feed scrolled down safely inside container without moving the browser page
   useEffect(() => {
-    mirrorEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (mirrorFeedContainerRef.current) {
+      mirrorFeedContainerRef.current.scrollTop = mirrorFeedContainerRef.current.scrollHeight;
+    }
   }, [mirroredMessages]);
 
   // Load and consolidate leads in real-time from Firestore, localStorage and existing chats
@@ -1358,7 +1360,7 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
                   </div>
 
                   {/* Messages Feed */}
-                  <div className="grow overflow-y-auto p-4 space-y-3 bg-slate-900 text-slate-100 font-mono text-xs">
+                  <div ref={mirrorFeedContainerRef} className="grow overflow-y-auto p-4 space-y-3 bg-slate-900 text-slate-100 font-mono text-xs">
                     {mirroredMessages.length === 0 ? (
                       <p className="text-center text-slate-500 py-12">Carregando feed de transmissão...</p>
                     ) : (
@@ -1395,7 +1397,6 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
                         );
                       })
                     )}
-                    <div ref={mirrorEndRef} />
                   </div>
 
                 </div>
