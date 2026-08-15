@@ -1587,25 +1587,48 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
                       const hasDevice = Boolean(item.deviceId);
                       return (
                         <div key={item.id} className="p-3.5 border border-slate-200/80 hover:border-indigo-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50/50 transition-all shadow-sm">
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-2">
-                              <p className="font-bold text-slate-900 text-sm">{item.name}</p>
-                              {hasDevice ? (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                                  <Smartphone className="w-3 h-3" />
-                                  <span>{item.lastDeviceName || 'Aparelho Travado'}</span>
-                                </span>
+                          <div className="flex items-center gap-3">
+                            {/* Seller Avatar Thumbnail */}
+                            <div className="w-10 h-10 rounded-xl bg-indigo-100 border border-indigo-200 overflow-hidden flex items-center justify-center shrink-0 shadow-sm">
+                              {item.avatarUrl ? (
+                                <img 
+                                  src={item.avatarUrl} 
+                                  referrerPolicy="no-referrer" 
+                                  alt={item.name} 
+                                  className="w-full h-full object-cover" 
+                                />
                               ) : (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-200 text-slate-700">
-                                  <span>Livre (Aguardando 1º Acesso)</span>
+                                <span className="font-bold text-xs text-indigo-700">
+                                  {item.name.slice(0, 2).toUpperCase()}
                                 </span>
                               )}
                             </div>
-                            <p className="text-xs text-slate-500 font-medium">
-                              {hasDevice 
-                                ? `🔒 Acesso restrito a este aparelho. Se o vendedor trocar de celular, clique em "Resetar Aparelho".`
-                                : `Entrada liberada sem senha. O primeiro celular/computador que entrar será salvo.`}
-                            </p>
+
+                            <div className="space-y-0.5">
+                              <div className="flex items-center gap-2">
+                                <p className="font-bold text-slate-900 text-sm">{item.name}</p>
+                                {item.avatarUrl && (
+                                  <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.2 rounded font-bold">
+                                    📷 Foto Ativa
+                                  </span>
+                                )}
+                                {hasDevice ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                    <Smartphone className="w-3 h-3" />
+                                    <span>{item.lastDeviceName || 'Aparelho Travado'}</span>
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-200 text-slate-700">
+                                    <span>Livre (Aguardando 1º Acesso)</span>
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-xs text-slate-500 font-medium">
+                                {hasDevice 
+                                  ? `🔒 Acesso restrito a este aparelho. Se o vendedor trocar de celular, clique em "Resetar Aparelho".`
+                                  : `Entrada liberada sem senha. O primeiro celular/computador que entrar será salvo.`}
+                              </p>
+                            </div>
                           </div>
 
                           <div className="flex flex-wrap items-center gap-1.5 shrink-0">

@@ -43,6 +43,7 @@ export interface User {
   role: 'admin' | 'seller';
   createdAt: string;
   activeChatsCount?: number;
+  avatarUrl?: string | null;
   deviceId?: string | null;
   deviceRegisteredAt?: string | null;
   lastDeviceName?: string | null;
@@ -56,6 +57,7 @@ export interface Chat {
   status: ChatStatus;
   sellerId?: string;
   sellerName?: string;
+  sellerAvatar?: string | null;
   lastMessage?: string;
   lastMessageAt?: string;
   lastMessageSender?: 'client' | 'seller';
@@ -71,6 +73,7 @@ export interface Message {
   companyId: string;
   senderType: 'client' | 'seller';
   senderName: string;
+  senderAvatar?: string | null;
   text: string;
   imageUrl?: string;
   createdAt: string;
@@ -81,6 +84,7 @@ export interface InternalMessage {
   companyId: string;
   senderId: string;
   senderName: string;
+  senderAvatar?: string | null;
   senderRole: 'admin' | 'seller';
   recipientId: string; // sellerId OR 'all' (announcement to all sellers) OR 'admin'
   recipientName?: string;

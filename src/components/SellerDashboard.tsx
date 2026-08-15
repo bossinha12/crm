@@ -7,7 +7,8 @@ import { crmAlarm } from '../lib/audio';
 import { 
   MessageSquare, User as UserIcon, Send, LogOut, Phone, ShieldClose, 
   Volume2, VolumeX, Sparkles, Copy, Check, CheckSquare,
-  Image as ImageIcon, Camera, Loader2, ExternalLink, X, ShieldCheck, Megaphone
+  Image as ImageIcon, Camera, Loader2, ExternalLink, X, ShieldCheck, Megaphone,
+  Upload, CheckCircle
 } from 'lucide-react';
 import InternalTeamChat from './InternalTeamChat';
 
@@ -25,6 +26,12 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
   const [currentResponse, setCurrentResponse] = useState('');
   const [alarmIsSounding, setAlarmIsSounding] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
+
+  // Seller Profile Photo State
+  const [sellerAvatar, setSellerAvatar] = useState<string | null>(sellerUser.avatarUrl || null);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [avatarSuccessMsg, setAvatarSuccessMsg] = useState<string | null>(null);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
 
   // Internal Direct Team Chat with Owner / Management
   const [isInternalChatOpen, setIsInternalChatOpen] = useState(false);
@@ -249,6 +256,67 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
     }
   }, [selectedChatMessages.length]);
 
+  // Avatar Upload Handler
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      alert('Por favor, selecione um arquivo de imagem válido (JPG, PNG, WEBP).');
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      alert('A foto deve ter no máximo 10MB.');
+      return;
+    }
+
+    setIsUploadingAvatar(true);
+    setAvatarSuccessMsg(null);
+
+    try {
+      // 1. Upload to ImgBB to get a fast, permanent image URL
+      const uploadedUrl = await uploadToImgBB(file);
+      setSellerAvatar(uploadedUrl);
+
+      // 2. Update Firestore User Profile
+      const userDocRef = doc(db, 'companies', companyId, 'users', sellerUser.id);
+      await updateDoc(userDocRef, sanitizeFirestoreData({
+        avatarUrl: uploadedUrl
+      })).catch(err => console.warn("Aviso ao salvar avatar no Firestore:", err));
+
+      // 3. Update localStorage users list
+      const savedLocal = localStorage.getItem(`atendepro_local_users_${companyId}`) || localStorage.getItem('atendepro_local_users');
+      if (savedLocal) {
+        try {
+          let localList: User[] = JSON.parse(savedLocal);
+          localList = localList.map(u => u.id === sellerUser.id ? { ...u, avatarUrl: uploadedUrl } : u);
+          localStorage.setItem(`atendepro_local_users_${companyId}`, JSON.stringify(localList));
+          localStorage.setItem('atendepro_local_users', JSON.stringify(localList));
+        } catch (e) {}
+      }
+
+      // 4. Update current active chats in Firestore with the new avatar
+      chatsRef.current.forEach(c => {
+        if (c.sellerId === sellerUser.id) {
+          const cRef = doc(db, 'companies', companyId, 'chats', c.id);
+          updateDoc(cRef, { sellerAvatar: uploadedUrl }).catch(() => {});
+        }
+      });
+
+      setAvatarSuccessMsg('Sua foto de perfil foi atualizada com sucesso! Seus clientes agora a verão no chat.');
+      setTimeout(() => setAvatarSuccessMsg(null), 5000);
+    } catch (err) {
+      console.error("Erro ao enviar foto de perfil:", err);
+      alert('Não foi possível enviar a foto. Tente novamente ou use outra imagem.');
+    } finally {
+      setIsUploadingAvatar(false);
+      if (avatarInputRef.current) {
+        avatarInputRef.current.value = '';
+      }
+    }
+  };
+
   // Claims a chat from unassigned index list
   const handleClaimChat = async (chat: Chat) => {
     try {
@@ -258,6 +326,7 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
         status: ChatStatus.ACTIVE,
         sellerId: sellerUser.id,
         sellerName: sellerUser.name,
+        sellerAvatar: sellerAvatar || sellerUser.avatarUrl || null,
         unreadBySeller: false,
         updatedAt: new Date().toISOString()
       }));
@@ -269,6 +338,7 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
         companyId,
         senderType: 'seller',
         senderName: 'Sistema',
+        senderAvatar: sellerAvatar || sellerUser.avatarUrl || null,
         text: `O atendimento foi assumido por: **${sellerUser.name}**`,
         createdAt: new Date().toISOString()
       }));
@@ -295,6 +365,7 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
         companyId,
         senderType: 'seller',
         senderName: sellerUser.name,
+        senderAvatar: sellerAvatar || sellerUser.avatarUrl || null,
         text: finalMsgText,
         createdAt: new Date().toISOString()
       }));
@@ -304,6 +375,7 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
         lastMessage: finalMsgText,
         lastMessageAt: new Date().toISOString(),
         lastMessageSender: 'seller',
+        sellerAvatar: sellerAvatar || sellerUser.avatarUrl || null,
         unreadByClient: true,
         unreadBySeller: false,
         updatedAt: new Date().toISOString()
@@ -417,20 +489,68 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
       
       {/* Top Banner Context Card */}
       <div className="bg-slate-900 border border-slate-800 text-white rounded-2xl p-5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 relative overflow-hidden shrink-0 shadow-lg shadow-slate-900/10">
-        <div className="flex items-center gap-3.5 mr-auto">
-          <div className="w-12 h-12 rounded-2xl border border-slate-700 overflow-hidden shrink-0 bg-indigo-950/40 shadow-inner flex items-center justify-center">
-            {currentLogo ? (
-              <img src={currentLogo} referrerPolicy="no-referrer" alt={`${currentName} Logo`} className="w-full h-full object-cover" />
-            ) : (
-              <MessageSquare className="w-6 h-6 text-indigo-400" />
-            )}
+        
+        {/* Hidden Avatar File Input */}
+        <input 
+          type="file" 
+          ref={avatarInputRef} 
+          accept="image/*" 
+          className="hidden" 
+          onChange={handleAvatarUpload} 
+        />
+
+        <div className="flex items-center gap-4 mr-auto">
+          {/* Interactive Seller Avatar with Upload Trigger */}
+          <div className="relative group shrink-0">
+            <div className="w-14 h-14 rounded-2xl border-2 border-indigo-400/40 overflow-hidden bg-gradient-to-br from-indigo-900 to-slate-800 shadow-md flex items-center justify-center relative">
+              {sellerAvatar ? (
+                <img 
+                  src={sellerAvatar} 
+                  referrerPolicy="no-referrer" 
+                  alt={sellerUser.name} 
+                  className="w-full h-full object-cover" 
+                />
+              ) : (
+                <div className="text-lg font-black text-indigo-200">
+                  {sellerUser.name.slice(0, 2).toUpperCase()}
+                </div>
+              )}
+
+              {/* Uploading indicator */}
+              {isUploadingAvatar && (
+                <div className="absolute inset-0 bg-black/70 flex items-center justify-center">
+                  <Loader2 className="w-5 h-5 text-indigo-400 animate-spin" />
+                </div>
+              )}
+            </div>
+
+            {/* Change photo button trigger */}
+            <button
+              type="button"
+              onClick={() => avatarInputRef.current?.click()}
+              disabled={isUploadingAvatar}
+              className="absolute -bottom-1.5 -right-1.5 p-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl shadow-md border-2 border-slate-900 transition-all cursor-pointer group-hover:scale-110"
+              title="Clique para adicionar ou trocar sua foto de perfil (visível aos clientes)"
+            >
+              <Camera className="w-3.5 h-3.5" />
+            </button>
           </div>
+
           <div>
-            <span className="text-indigo-400 font-extrabold text-[10px] tracking-wider uppercase bg-indigo-950/50 border border-indigo-800/10 px-2.5 py-0.5 rounded-full inline-block mb-1">
-              CONEXÃO REAL-TIME ATIVA
-            </span>
-            <h2 className="text-xl font-bold tracking-tight">Atendimentos de {sellerUser.name}</h2>
-            <p className="text-xs text-slate-400 mt-0.5">{currentName} • CRM Atendimento</p>
+            <div className="flex items-center gap-2">
+              <span className="text-indigo-400 font-extrabold text-[10px] tracking-wider uppercase bg-indigo-950/50 border border-indigo-800/10 px-2.5 py-0.5 rounded-full inline-block">
+                VENDEDOR ONLINE
+              </span>
+              <button
+                type="button"
+                onClick={() => avatarInputRef.current?.click()}
+                className="text-[11px] text-indigo-300 hover:text-white underline cursor-pointer font-medium"
+              >
+                {sellerAvatar ? '📷 Trocar Foto' : '📷 Adicionar Minha Foto'}
+              </button>
+            </div>
+            <h2 className="text-xl font-bold tracking-tight text-white mt-0.5">{sellerUser.name}</h2>
+            <p className="text-xs text-slate-400">{currentName} • Foto de perfil visível no chat dos clientes</p>
           </div>
         </div>
 
@@ -513,6 +633,23 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
           </button>
         </div>
       </div>
+
+      {/* Avatar upload success notification */}
+      {avatarSuccessMsg && (
+        <div className="bg-emerald-600 text-white rounded-2xl p-3.5 px-4 flex items-center justify-between gap-3 shadow-lg shadow-emerald-600/20 text-xs font-semibold animate-fade-in">
+          <div className="flex items-center gap-2">
+            <CheckCircle className="w-4 h-4 text-emerald-200 shrink-0" />
+            <span>{avatarSuccessMsg}</span>
+          </div>
+          <button 
+            type="button" 
+            onClick={() => setAvatarSuccessMsg(null)} 
+            className="p-1 hover:bg-white/20 rounded-lg transition-colors cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Internal Management Notice Banner (if there are unread messages) */}
       {unreadInternalMsgs > 0 && (

@@ -163,6 +163,7 @@ export default function InternalTeamChat({
       companyId,
       senderId: currentUser.id,
       senderName: currentUser.name,
+      senderAvatar: currentUser.avatarUrl || null,
       senderRole: isAdmin ? 'admin' : 'seller',
       recipientId: selectedRecipientId,
       recipientName,
@@ -214,6 +215,7 @@ export default function InternalTeamChat({
         companyId,
         senderId: currentUser.id,
         senderName: currentUser.name,
+        senderAvatar: currentUser.avatarUrl || null,
         senderRole: isAdmin ? 'admin' : 'seller',
         recipientId: selectedRecipientId,
         recipientName,
@@ -351,10 +353,14 @@ export default function InternalTeamChat({
                     }`}
                   >
                     <div className="flex items-center gap-2.5 min-w-0">
-                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 font-bold text-xs ${
+                      <div className={`w-8 h-8 rounded-lg overflow-hidden flex items-center justify-center shrink-0 font-bold text-xs ${
                         isSelected ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700'
                       }`}>
-                        {seller.name.charAt(0).toUpperCase()}
+                        {seller.avatarUrl ? (
+                          <img src={seller.avatarUrl} referrerPolicy="no-referrer" alt={seller.name} className="w-full h-full object-cover" />
+                        ) : (
+                          seller.name.charAt(0).toUpperCase()
+                        )}
                       </div>
                       <div className="truncate">
                         <p className="text-xs font-bold leading-tight truncate">{seller.name}</p>
