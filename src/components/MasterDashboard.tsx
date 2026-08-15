@@ -988,7 +988,7 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
           </table>
 
           <div class="footer">
-            <div>Larissa Móveis — Painel Master Administrativo.</div>
+            <div>Atendimento Online — Painel Master Administrativo.</div>
             <div>Assinatura do Proprietário: ___________________________</div>
           </div>
         </body>
@@ -997,8 +997,8 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
     printWindow.document.close();
   };
 
-  const currentLogo = company?.logoUrl || 'https://i.postimg.cc/8CdttXNK/Whats-App-Image-2026-06-10-at-14-30-14.jpg';
-  const currentName = company?.name || 'Larissa Móveis';
+  const currentLogo = company?.logoUrl || '';
+  const currentName = company?.name || 'Atendimento Online';
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1031,8 +1031,12 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
       {/* Top Banner Navigation Header */}
       <div className="bg-slate-900 border border-slate-800 text-white rounded-2xl p-5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shrink-0 shadow-lg shadow-slate-950/15">
         <div className="flex items-center gap-3.5">
-          <div className="w-12 h-12 rounded-full border border-slate-700 overflow-hidden shrink-0 bg-white shadow-inner flex items-center justify-center">
-            <img src={currentLogo} referrerPolicy="no-referrer" alt={`${currentName} Logo`} className="w-full h-full object-cover" />
+          <div className="w-12 h-12 rounded-2xl border border-slate-700 overflow-hidden shrink-0 bg-indigo-950/40 shadow-inner flex items-center justify-center">
+            {currentLogo ? (
+              <img src={currentLogo} referrerPolicy="no-referrer" alt={`${currentName} Logo`} className="w-full h-full object-cover" />
+            ) : (
+              <Sparkles className="w-6 h-6 text-indigo-400" />
+            )}
           </div>
           <div>
             <span className="text-indigo-400 font-extrabold text-[10px] tracking-wider uppercase bg-indigo-950/50 border border-indigo-800 px-2.5 py-0.5 rounded-full inline-block mb-1 animate-pulse">

@@ -18,13 +18,13 @@ interface SuperAdminDashboardProps {
   onExitSuperAdmin: () => void;
 }
 
-const DEFAULT_LARISSA_COMPANY: Company = {
+const DEFAULT_MASTER_COMPANY: Company = {
   id: 'atendepro_default',
-  name: 'Larissa Móveis',
-  slug: 'larissamoveis',
-  logoUrl: 'https://i.postimg.cc/8CdttXNK/Whats-App-Image-2026-06-10-at-14-30-14.jpg',
-  adminName: 'Larissa',
-  adminPassword: '13259898',
+  name: 'Central de Atendimento',
+  slug: 'atendimento',
+  logoUrl: '',
+  adminName: 'Administrador',
+  adminPassword: 'admin',
   createdAt: '2026-06-01T00:00:00.000Z',
   license: {
     status: 'active',
@@ -33,7 +33,7 @@ const DEFAULT_LARISSA_COMPANY: Company = {
     planName: 'Plano Pro Vitalício',
     monthlyPrice: 0,
     expiresAt: '2099-12-31T23:59:59.000Z',
-    contactPhone: '85992862177',
+    contactPhone: '',
     notes: 'Empresa Matriz / Principal'
   }
 };
@@ -135,17 +135,28 @@ export default function SuperAdminDashboard({
         list.push(c);
         if (c.id === 'atendepro_default') {
           hasDefault = true;
+          // If default company still holds old initial template name, update it to clean "Atendimento Online"
+          if (c.name === 'Larissa Móveis' || c.name === 'Central de Atendimento') {
+            setDoc(doc(db, 'companies', 'atendepro_default'), {
+              name: 'Atendimento Online',
+              slug: 'atendimento',
+              logoUrl: ''
+            }, { merge: true }).catch(console.warn);
+            c.name = 'Atendimento Online';
+            c.slug = 'atendimento';
+            c.logoUrl = '';
+          }
         }
       });
 
-      // If Larissa default company is missing from firestore, register it automatically
+      // If default company is missing from firestore, register it automatically
       if (!hasDefault) {
         try {
-          await setDoc(doc(db, 'companies', 'atendepro_default'), DEFAULT_LARISSA_COMPANY);
-          list.unshift(DEFAULT_LARISSA_COMPANY);
+          await setDoc(doc(db, 'companies', 'atendepro_default'), DEFAULT_MASTER_COMPANY);
+          list.unshift(DEFAULT_MASTER_COMPANY);
         } catch (e) {
           console.warn("Could not sync default company:", e);
-          list.unshift(DEFAULT_LARISSA_COMPANY);
+          list.unshift(DEFAULT_MASTER_COMPANY);
         }
       }
 
@@ -161,10 +172,10 @@ export default function SuperAdminDashboard({
         try {
           setCompanies(JSON.parse(savedLocal));
         } catch (e) {
-          setCompanies([DEFAULT_LARISSA_COMPANY]);
+          setCompanies([DEFAULT_MASTER_COMPANY]);
         }
       } else {
-        setCompanies([DEFAULT_LARISSA_COMPANY]);
+        setCompanies([DEFAULT_MASTER_COMPANY]);
       }
       setLoading(false);
     });

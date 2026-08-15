@@ -19,8 +19,8 @@ const sanitizeInput = (text: string) => {
 };
 
 export default function LoginScreen({ companyId, company, onLoginSuccess }: LoginScreenProps) {
-  const configuredAdminName = company?.adminName || (companyId === 'atendepro_default' ? 'Larissa' : 'Administrador');
-  const configuredAdminPass = company?.adminPassword || '13259898';
+  const configuredAdminName = company?.adminName || 'Administrador';
+  const configuredAdminPass = company?.adminPassword || 'admin';
 
   const isOwnerMode = (() => {
     const params = new URLSearchParams(window.location.search);
@@ -61,16 +61,15 @@ export default function LoginScreen({ companyId, company, onLoginSuccess }: Logi
 
     let filtered = localUsersList.filter(u => 
       sanitizeInput(u.name) !== sanitizeInput(configuredAdminName) &&
-      u.id !== adminUserId &&
-      u.id !== 'admin-larissa'
+      u.id !== adminUserId
     );
 
     filtered.unshift(adminUser);
     return filtered;
   });
 
-  const companyName = company?.name || (companyId === 'atendepro_default' ? 'Larissa Móveis' : 'Portal de Atendimento');
-  const companyLogo = company?.logoUrl || (companyId === 'atendepro_default' ? 'https://i.postimg.cc/8CdttXNK/Whats-App-Image-2026-06-10-at-14-30-14.jpg' : '');
+  const companyName = company?.name || 'Atendimento Online';
+  const companyLogo = company?.logoUrl || '';
 
   // Listen to registered employees in real-time to make login select options or quick selections available instantly
   useEffect(() => {
@@ -170,8 +169,8 @@ export default function LoginScreen({ companyId, company, onLoginSuccess }: Logi
 
     const isAdminLogin = 
       inputName === sanitizeInput(configuredAdminName) || 
-      inputName === 'admin' || 
-      (companyId === 'atendepro_default' && inputName === 'larissa');
+      inputName === 'admin' ||
+      inputName === 'administrador';
 
     // Direct check: Instant validation for administrator
     if (isAdminLogin) {
@@ -277,24 +276,22 @@ export default function LoginScreen({ companyId, company, onLoginSuccess }: Logi
 
   return (
     <div id="login-container" className="flex flex-col justify-center items-center py-4 sm:py-8 px-4 sm:px-6 w-full max-w-md mx-auto">
-      <div className="w-full space-y-6 bg-white p-6 sm:p-8 rounded-2xl border border-slate-200/80 shadow-lg shadow-slate-200/50">
+      <div className="w-full space-y-6 bg-white p-7 sm:p-8 rounded-3xl border border-slate-200/80 shadow-2xl shadow-slate-200/60">
         
         {/* Branding Title */}
         <div className="text-center">
-          <div className="mx-auto h-20 w-20 sm:h-24 sm:w-24 rounded-full border border-slate-200 overflow-hidden shadow-md mb-3 bg-slate-50 flex items-center justify-center">
+          <div className="mx-auto h-20 w-20 sm:h-22 sm:w-22 rounded-2xl border border-slate-200 overflow-hidden shadow-md mb-3.5 bg-gradient-to-br from-indigo-50 to-slate-100 flex items-center justify-center">
             {companyLogo ? (
               <img src={companyLogo} referrerPolicy="no-referrer" alt={`${companyName} Logo`} className="w-full h-full object-cover" />
             ) : (
-              <span className="text-3xl font-black text-indigo-600 tracking-tight">
-                {companyName.slice(0, 2).toUpperCase()}
-              </span>
+              <LogIn className="w-9 h-9 text-indigo-600" />
             )}
           </div>
-          <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-800 tracking-tight">{companyName}</h2>
-          <p className="mt-1.5 text-xs sm:text-sm text-slate-500">
+          <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">{companyName}</h2>
+          <p className="mt-1.5 text-xs sm:text-sm text-slate-500 font-medium">
             {isOwnerMode 
-              ? 'Atendimento Online • Acesso do Gerente / Dono da Loja'
-              : 'Atendimento Online • Portal de Vendedores e Gerente'}
+              ? 'Acesso do Gerente / Dono da Loja'
+              : 'Painel Comercial • Vendedores e Gerente'}
           </p>
         </div>
 
@@ -342,7 +339,7 @@ export default function LoginScreen({ companyId, company, onLoginSuccess }: Logi
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="block w-full px-3.5 py-2.5 pl-10 border border-slate-200 rounded-xl placeholder-slate-400 text-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
-                  placeholder={sanitizeInput(username) === sanitizeInput(configuredAdminName) || sanitizeInput(username) === 'larissa' || sanitizeInput(username) === 'admin' ? `Digite a senha do administrador (${configuredAdminName})` : "Não obrigatória para vendedores"}
+                  placeholder={sanitizeInput(username) === sanitizeInput(configuredAdminName) || sanitizeInput(username) === 'admin' || sanitizeInput(username) === 'administrador' ? `Digite a senha do administrador (${configuredAdminName})` : "Não obrigatória para vendedores"}
                 />
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                   <Key className="h-4 w-4" />
@@ -353,7 +350,7 @@ export default function LoginScreen({ companyId, company, onLoginSuccess }: Logi
               <div className="mt-1.5 min-h-[1.5rem] text-[11px] font-medium leading-normal flex items-center">
                 {username.trim() === '' ? (
                   <span className="text-slate-400">ℹ️ Vendedores cadastrados entram sem senha. Administrador(a) precisa de senha.</span>
-                ) : (sanitizeInput(username) === sanitizeInput(configuredAdminName) || sanitizeInput(username) === 'larissa' || sanitizeInput(username) === 'admin') ? (
+                ) : (sanitizeInput(username) === sanitizeInput(configuredAdminName) || sanitizeInput(username) === 'admin' || sanitizeInput(username) === 'administrador') ? (
                   <span className="text-amber-600 font-semibold">🔒 Insira a senha do administrador ({configuredAdminName}).</span>
                 ) : (() => {
                   const found = availableSellers.find(s => s.role === 'seller' && sanitizeInput(s.name) === sanitizeInput(username));

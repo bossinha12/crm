@@ -450,35 +450,37 @@ export default function ClientWidget({ companyId, companyName, companyLogo, onGo
   // If no chatId is tracked, show clean register login form
   if (!chatId) {
     return (
-      <div className="max-w-lg w-full bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden mt-6 transition-all duration-300">
+      <div className="max-w-md w-full bg-white rounded-3xl border border-slate-200/80 shadow-2xl shadow-slate-200/60 overflow-hidden mt-4 transition-all duration-300">
         
-        {/* Header Block with Store Logo */}
-        <div className="bg-indigo-600 text-white p-6 relative flex flex-col sm:flex-row items-center sm:items-start gap-4">
-          <div className="absolute top-2 right-2 p-4 opacity-10 hidden sm:block">
-            <MessageSquare className="w-24 h-24" />
-          </div>
-          <div className="w-16 h-16 rounded-full border border-white/20 overflow-hidden shrink-0 bg-white shadow-inner flex items-center justify-center">
-            {companyLogo ? (
-              <img src={companyLogo} referrerPolicy="no-referrer" alt={`${companyName} Logo`} className="w-full h-full object-cover" />
-            ) : (
-              <span className="text-2xl font-black text-indigo-600">
-                {companyName.slice(0, 2).toUpperCase()}
-              </span>
-            )}
-          </div>
-          <div className="relative z-10 text-center sm:text-left">
-            <p className="text-indigo-100 text-xs font-semibold uppercase tracking-wider">Suporte Ao Vivo</p>
-            <h2 className="text-2xl font-bold tracking-tight">{companyName}</h2>
-            <p className="text-sm text-indigo-200 mt-1">
-              Fale instantaneamente com os nossos vendedores em tempo real!
+        {/* Header Block with Clean Minimalist Gradient */}
+        <div className="bg-gradient-to-br from-indigo-600 via-indigo-700 to-slate-900 text-white p-7 sm:p-8 relative overflow-hidden text-center">
+          {/* Subtle geometric circles in background */}
+          <div className="absolute -right-8 -top-8 w-32 h-32 rounded-full bg-white/5 pointer-events-none"></div>
+          <div className="absolute -left-6 -bottom-6 w-24 h-24 rounded-full bg-white/5 pointer-events-none"></div>
+          
+          <div className="relative z-10 flex flex-col items-center">
+            <div className="w-16 h-16 rounded-2xl border-2 border-white/20 overflow-hidden bg-white/10 backdrop-blur-md shadow-lg flex items-center justify-center mb-3">
+              {companyLogo ? (
+                <img src={companyLogo} referrerPolicy="no-referrer" alt={`${companyName} Logo`} className="w-full h-full object-cover" />
+              ) : (
+                <MessageSquare className="w-8 h-8 text-white" />
+              )}
+            </div>
+
+            <span className="text-[11px] font-bold text-indigo-200 tracking-wider uppercase px-2.5 py-0.5 rounded-full bg-white/10 backdrop-blur-sm border border-white/10 mb-1.5">
+              Atendimento Online
+            </span>
+            <h2 className="text-2xl font-extrabold text-white tracking-tight">{companyName}</h2>
+            <p className="text-xs text-indigo-100/90 mt-1 max-w-xs leading-relaxed">
+              Inicie uma conversa em tempo real com nossa equipe de suporte e vendas
             </p>
           </div>
         </div>
 
         {/* Content Form Body */}
-        <form onSubmit={handleStartChat} className="p-6 space-y-4">
+        <form onSubmit={handleStartChat} className="p-6 sm:p-7 space-y-4">
           <div className="space-y-1">
-            <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1">
+            <label className="text-xs font-bold text-slate-600 uppercase tracking-wider block mb-1">
               Como podemos lhe chamar? *
             </label>
             <div className="relative">
@@ -488,7 +490,7 @@ export default function ClientWidget({ companyId, companyName, companyLogo, onGo
                 value={clientName}
                 onChange={(e) => setClientName(e.target.value)}
                 placeholder="Seu nome completo ou apelido"
-                className="w-full text-slate-800 text-sm py-2.5 px-3.5 pl-10 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                className="w-full text-slate-800 text-sm py-2.5 px-3.5 pl-10 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 transition-all placeholder:text-slate-400"
               />
               <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                 <User className="w-4 h-4" />
@@ -497,8 +499,8 @@ export default function ClientWidget({ companyId, companyName, companyLogo, onGo
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1">
-              Telefone / WhatsApp (Opcional)
+            <label className="text-xs font-bold text-slate-600 uppercase tracking-wider block mb-1">
+              WhatsApp / Telefone <span className="text-slate-400 font-normal lowercase">(opcional)</span>
             </label>
             <div className="relative">
               <input
@@ -506,7 +508,7 @@ export default function ClientWidget({ companyId, companyName, companyLogo, onGo
                 value={clientPhone}
                 onChange={(e) => setClientPhone(e.target.value)}
                 placeholder="Ex: (85) 98765-4321"
-                className="w-full text-slate-800 text-sm py-2.5 px-3.5 pl-10 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                className="w-full text-slate-800 text-sm py-2.5 px-3.5 pl-10 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 transition-all placeholder:text-slate-400"
               />
               <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                 <Phone className="w-4 h-4" />
@@ -515,33 +517,33 @@ export default function ClientWidget({ companyId, companyName, companyLogo, onGo
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1">
+            <label className="text-xs font-bold text-slate-600 uppercase tracking-wider block mb-1">
               Qual sua dúvida ou solicitação inicial?
             </label>
             <textarea
               rows={2}
               value={initialMsg}
               onChange={(e) => setInitialMsg(e.target.value)}
-              placeholder="Digite aqui o que você está precisando..."
-              className="w-full text-slate-800 text-sm p-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+              placeholder="Digite aqui o que você precisa..."
+              className="w-full text-slate-800 text-sm p-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 transition-all placeholder:text-slate-400 resize-none"
             />
           </div>
 
           <div className="pt-2">
             <button
-               type="submit"
+              type="submit"
               disabled={loading}
-              className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-semibold shadow-lg shadow-indigo-150 flex items-center justify-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
+              className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white rounded-xl font-bold text-sm shadow-lg shadow-indigo-200 flex items-center justify-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
             >
               {loading ? (
                 <>
                   <RefreshCw className="w-4 h-4 animate-spin" />
-                  <span>Conectando Chamado...</span>
+                  <span>Conectando Atendimento...</span>
                 </>
               ) : (
                 <>
                   <MessageSquare className="w-4 h-4" />
-                  <span>Iniciar Atendimento de Suporte</span>
+                  <span>Iniciar Atendimento ao Vivo</span>
                 </>
               )}
             </button>
@@ -549,13 +551,13 @@ export default function ClientWidget({ companyId, companyName, companyLogo, onGo
 
           {/* Quick return link to master menu */}
           {onGoBack && (
-            <div className="pt-1 text-center">
+            <div className="pt-2 text-center border-t border-slate-100">
               <button
                 type="button"
                 onClick={onGoBack}
-                className="text-xs text-slate-400 hover:text-slate-600 transition-colors uppercase tracking-wider font-semibold cursor-pointer"
+                className="text-xs text-slate-400 hover:text-slate-700 transition-colors uppercase tracking-wider font-semibold cursor-pointer"
               >
-                Voltar ao painel inicial
+                Voltar ao menu inicial
               </button>
             </div>
           )}

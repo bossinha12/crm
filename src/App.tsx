@@ -191,6 +191,16 @@ export default function App() {
           }
 
           if (matched) {
+            if (matched.id === 'atendepro_default' && (matched.name === 'Larissa Móveis' || matched.name === 'Central de Atendimento')) {
+              matched.name = 'Atendimento Online';
+              matched.slug = 'atendimento';
+              matched.logoUrl = '';
+              setDoc(doc(db, 'companies', 'atendepro_default'), {
+                name: 'Atendimento Online',
+                slug: 'atendimento',
+                logoUrl: ''
+              }, { merge: true }).catch(console.warn);
+            }
             setCompany(matched);
             setCompanyId(matched.id);
           } else {
@@ -198,14 +208,14 @@ export default function App() {
             if (targetParam === 'atendepro_default' || targetParam === 'larissamoveis') {
               const defaultCompany: Company = {
                 id: 'atendepro_default',
-                name: 'Larissa Móveis',
-                slug: 'larissamoveis',
-                logoUrl: 'https://i.postimg.cc/8CdttXNK/Whats-App-Image-2026-06-10-at-14-30-14.jpg',
-                adminName: 'Larissa',
-                adminPassword: '13259898',
+                name: 'Atendimento Online',
+                slug: 'atendimento',
+                logoUrl: '',
+                adminName: 'Administrador',
+                adminPassword: 'admin',
                 license: {
                   status: 'active',
-                  planName: 'Plano Pro Vitalício',
+                  planName: 'Plano Pro Master',
                   monthlyPrice: 0,
                   isLifetime: true
                 },
@@ -393,8 +403,8 @@ export default function App() {
     );
   }
 
-  const currentCompanyName = company?.name || (companyId === 'atendepro_default' ? 'Larissa Móveis' : 'Atendimento Online');
-  const currentCompanyLogo = company?.logoUrl || (companyId === 'atendepro_default' ? 'https://i.postimg.cc/8CdttXNK/Whats-App-Image-2026-06-10-at-14-30-14.jpg' : '');
+  const currentCompanyName = company?.name || 'Atendimento Online';
+  const currentCompanyLogo = company?.logoUrl || '';
 
   // 3. Render Logged-In CRM consoles (Master or Seller)
   if (currentUser) {
