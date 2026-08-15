@@ -1120,30 +1120,35 @@ export default function SuperAdminDashboard({
       {/* MODAL: Criar / Editar Empresa Licenciada */}
       {/* ------------------------------------------------------------- */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-xl w-full p-6 sm:p-8 space-y-6 shadow-2xl my-8">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-xl w-full shadow-2xl my-auto max-h-[92vh] flex flex-col overflow-hidden">
             
-            <div className="flex justify-between items-center pb-4 border-b border-slate-800">
+            {/* Modal Header - Sticky at top */}
+            <div className="flex justify-between items-center px-6 py-4 border-b border-slate-800 shrink-0 bg-slate-900/90 backdrop-blur-md">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-indigo-600/20 border border-indigo-500/30 text-indigo-400 flex items-center justify-center">
+                <div className="w-10 h-10 rounded-xl bg-indigo-600/20 border border-indigo-500/30 text-indigo-400 flex items-center justify-center shrink-0">
                   <Building2 className="w-5 h-5" />
                 </div>
                 <div>
-                  <h2 className="text-lg font-bold text-white">
+                  <h2 className="text-base sm:text-lg font-bold text-white leading-tight">
                     {editingCompany ? 'Editar Empresa Licenciada' : 'Cadastrar Nova Empresa Cliente'}
                   </h2>
                   <p className="text-xs text-slate-400">Configure os dados de acesso, marca e licença</p>
                 </div>
               </div>
               <button
+                type="button"
                 onClick={() => setIsModalOpen(false)}
-                className="text-slate-500 hover:text-slate-300 text-sm font-bold p-1 cursor-pointer"
+                className="text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-colors cursor-pointer shrink-0 ml-2"
+                title="Fechar"
               >
                 ✕
               </button>
             </div>
 
-            <form onSubmit={handleSaveCompany} className="space-y-4">
+            {/* Modal Body - Scrollable */}
+            <form onSubmit={handleSaveCompany} className="flex flex-col grow overflow-hidden">
+              <div className="p-5 sm:p-6 space-y-4 overflow-y-auto grow custom-scrollbar">
               
               {/* Row 1: Nome da Loja e Slug */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1502,8 +1507,10 @@ export default function SuperAdminDashboard({
                 />
               </div>
 
-              {/* Action Buttons */}
-              <div className="pt-4 border-t border-slate-800 flex justify-end gap-3">
+              </div>
+
+              {/* Action Buttons - Sticky at Bottom */}
+              <div className="px-6 py-4 border-t border-slate-800 bg-slate-900/95 backdrop-blur-md flex items-center justify-end gap-3 shrink-0">
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
