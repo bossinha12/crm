@@ -9,7 +9,7 @@ import {
   Users, UserPlus, FileText, Eye, Key, LogOut, Trash2, 
   TrendingUp, TrendingDown, ClipboardList, ShieldAlert, CheckCircle, Lock, Sparkles,
   Phone, Megaphone, Download, Copy, Check, Search, Plus, MessageCircle, MessageSquare, ExternalLink, RefreshCw, X, Send,
-  RotateCcw, Smartphone, Link2
+  RotateCcw, Smartphone, Link2, Loader2
 } from 'lucide-react';
 import InternalTeamChat from './InternalTeamChat';
 
@@ -28,6 +28,7 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
   // Registration Form state
   const [newSellerName, setNewSellerName] = useState('');
   const [newSellerPassword, setNewSellerPassword] = useState('');
+  const [isRegisteringSeller, setIsRegisteringSeller] = useState(false);
   const [registerSuccess, setRegisterSuccess] = useState<string | null>(null);
   const [registerError, setRegisterError] = useState<string | null>(null);
 
@@ -86,6 +87,7 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
 
   // Load all users (Vendedores) in real time
   useEffect(() => {
+    const localKey = `atendepro_local_users_${companyId}`;
     const usersRef = collection(db, 'companies', companyId, 'users');
     const unsubUsers = onSnapshot(usersRef, (snapshot) => {
       const firestoreList: User[] = [];
@@ -94,7 +96,7 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
       });
 
       // Load local users fallback
-      const savedLocal = localStorage.getItem('atendepro_local_users');
+      const savedLocal = localStorage.getItem(localKey) || localStorage.getItem('atendepro_local_users');
       let localUsersList: User[] = [];
       if (savedLocal) {
         try {
@@ -111,10 +113,10 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
       setUsers(merged);
 
       // Save sync back to localStorage
-      localStorage.setItem('atendepro_local_users', JSON.stringify(merged));
+      localStorage.setItem(localKey, JSON.stringify(merged));
     }, (error) => {
-      console.error("Erro em tempo real ao carregar vendedores do Firestore, usando fallback local:", error);
-      const savedLocal = localStorage.getItem('atendepro_local_users');
+      console.warn("Aviso em tempo real ao carregar vendedores do Firestore, usando fallback local:", error);
+      const savedLocal = localStorage.getItem(localKey) || localStorage.getItem('atendepro_local_users');
       let localUsersList: User[] = [];
       if (savedLocal) {
         try {
@@ -495,10 +497,12 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
     e.preventDefault();
     setRegisterError(null);
     setRegisterSuccess(null);
+    setIsRegisteringSeller(true);
 
     // Enforce Seller Plan Limit
     if (isSellerLimitReached) {
       setRegisterError(`Limite de vagas atingido! Seu plano atual permite no máximo ${maxSellers} vendedor(es). Entre em contato com o suporte para fazer upgrade do plano.`);
+      setIsRegisteringSeller(false);
       return;
     }
 
@@ -506,23 +510,27 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
 
     if (!nameToRegister) {
       setRegisterError('Preencha o nome do novo vendedor.');
+      setIsRegisteringSeller(false);
       return;
     }
 
-    // Check conflict locally using both state and local storage
-    const conflictInState = users.some(u => u.name.toLowerCase() === nameToRegister.toLowerCase());
+    const localKey = `atendepro_local_users_${companyId}`;
+
+    // Check conflict locally using both state and local storage strictly for sellers of this company
+    const conflictInState = users.some(u => u.role === 'seller' && u.name.trim().toLowerCase() === nameToRegister.toLowerCase());
     
-    const savedLocal = localStorage.getItem('atendepro_local_users');
     let localUsersList: User[] = [];
+    const savedLocal = localStorage.getItem(localKey);
     if (savedLocal) {
       try {
         localUsersList = JSON.parse(savedLocal);
       } catch (e) {}
     }
-    const conflictInLocal = localUsersList.some(u => u.name.toLowerCase() === nameToRegister.toLowerCase());
+    const conflictInLocal = localUsersList.some(u => u.role === 'seller' && u.name.trim().toLowerCase() === nameToRegister.toLowerCase());
 
     if (conflictInState || conflictInLocal) {
-      setRegisterError('Já existe um vendedor cadastrado com este nome.');
+      setRegisterError(`Já existe um vendedor cadastrado com o nome "${nameToRegister}".`);
+      setIsRegisteringSeller(false);
       return;
     }
 
@@ -537,8 +545,7 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
 
     // Save to localStorage immediately
     localUsersList.push(newUser);
-    localStorage.setItem(`atendepro_local_users_${companyId}`, JSON.stringify(localUsersList));
-    localStorage.setItem('atendepro_local_users', JSON.stringify(localUsersList));
+    localStorage.setItem(localKey, JSON.stringify(localUsersList));
 
     // Update state immediately
     setUsers(prev => {
@@ -547,18 +554,15 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
       return prev;
     });
 
-    try {
-      await setDoc(doc(db, 'companies', companyId, 'users', newUserId), sanitizeFirestoreData(newUser));
-      setNewSellerName('');
-      setNewSellerPassword('');
-      setRegisterSuccess(`Vendedor "${nameToRegister}" cadastrado com sucesso!`);
-    } catch (err) {
+    setNewSellerName('');
+    setNewSellerPassword('');
+    setRegisterSuccess(`✅ Vendedor "${nameToRegister}" gravado com sucesso! Já está visível na lista ao lado.`);
+    setIsRegisteringSeller(false);
+
+    // Sync Firestore in background
+    setDoc(doc(db, 'companies', companyId, 'users', newUserId), sanitizeFirestoreData(newUser)).catch(err => {
       console.warn("Aviso ao salvar vendedor no Firestore:", err);
-      setNewSellerName('');
-      setNewSellerPassword('');
-      // Even if Firestore fails, show success because local backup worked flawlessly
-      setRegisterSuccess(`Vendedor "${nameToRegister}" cadastrado com sucesso!`);
-    }
+    });
   };
 
   const handleDeleteSeller = async (userId: string, name: string) => {
@@ -1743,15 +1747,24 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
                   <div className="pt-2">
                     <button
                       type="submit"
-                      disabled={isSellerLimitReached}
-                      className={`w-full py-2.5 text-white rounded-xl font-semibold shadow-lg flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                      disabled={isSellerLimitReached || isRegisteringSeller}
+                      className={`w-full py-3 text-white rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 transition-all duration-150 transform active:scale-95 cursor-pointer ${
                         isSellerLimitReached
                           ? 'bg-slate-400 shadow-none cursor-not-allowed opacity-60'
-                          : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-100'
+                          : 'bg-indigo-600 hover:bg-indigo-700 hover:shadow-indigo-600/30 hover:scale-[1.01] shadow-indigo-200'
                       }`}
                     >
-                      <UserPlus className="w-4 h-4" />
-                      <span>{isSellerLimitReached ? 'Vagas Esgotadas (Faça Upgrade)' : 'Gravar Vendedor'}</span>
+                      {isRegisteringSeller ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Gravando Vendedor...</span>
+                        </>
+                      ) : (
+                        <>
+                          <UserPlus className="w-4 h-4" />
+                          <span>{isSellerLimitReached ? 'Vagas Esgotadas (Faça Upgrade)' : 'Gravar Vendedor'}</span>
+                        </>
+                      )}
                     </button>
                   </div>
                 </form>
