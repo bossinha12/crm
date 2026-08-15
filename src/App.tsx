@@ -3,6 +3,7 @@ import { doc, getDoc, setDoc, onSnapshot, collection } from 'firebase/firestore'
 import { db, auth, testFirestoreConnection } from './lib/firebase';
 import { signInAnonymously } from 'firebase/auth';
 import { User, Company } from './types';
+import MasterLoginScreen from './components/MasterLoginScreen';
 import LoginScreen from './components/LoginScreen';
 import ClientWidget from './components/ClientWidget';
 import SellerDashboard from './components/SellerDashboard';
@@ -63,8 +64,18 @@ export default function App() {
     }
   }, [currentUser, companyId]);
   
-  // Views navigation selection: 'home' | 'client' | 'login'
-  const [currentView, setCurrentView] = useState<'home' | 'client' | 'login'>('client');
+  // Views navigation selection: 'home' | 'client' | 'login' | 'master_login'
+  const isMasterRoot = companyId === 'atendepro_default';
+  const [currentView, setCurrentView] = useState<'home' | 'client' | 'login' | 'master_login'>(() => {
+    const params = new URLSearchParams(window.location.search);
+    const viewParam = params.get('view');
+    const customComp = params.get('empresa') || params.get('company') || params.get('slug');
+    if (viewParam === 'client') return 'client';
+    if (viewParam === 'login') return 'login';
+    if (viewParam === 'portal') return 'home';
+    if (!customComp) return 'master_login';
+    return 'client';
+  });
   const [connecting, setConnecting] = useState(true);
 
   // Parse direct access via URL Query Parameters and Hash Navigation
@@ -84,8 +95,11 @@ export default function App() {
                             params.get('c') || 
                             params.get('slug');
 
+      const activeCompId = customCompany ? customCompany.trim() : 'atendepro_default';
       if (customCompany && customCompany.trim() !== companyId) {
         setCompanyId(customCompany.trim());
+      } else if (!customCompany && companyId !== 'atendepro_default') {
+        setCompanyId('atendepro_default');
       }
 
       if (isSuper) {
@@ -93,13 +107,22 @@ export default function App() {
         document.title = 'Painel de Licenças | Gestão de Empresas';
       } else if (viewParam === 'login' || hash.includes('login')) {
         setIsSuperAdminView(false);
-        setCurrentView('login');
+        setCurrentView(activeCompId === 'atendepro_default' ? 'master_login' : 'login');
       } else if (viewParam === 'portal' || hash.includes('portal')) {
         setIsSuperAdminView(false);
         setCurrentView('home');
-      } else {
+      } else if (viewParam === 'client' || hash.includes('client')) {
         setIsSuperAdminView(false);
         setCurrentView('client');
+      } else {
+        setIsSuperAdminView(false);
+        // If on default root without specific client, show Master Login directly
+        if (!customCompany || activeCompId === 'atendepro_default') {
+          setCurrentView('master_login');
+        } else {
+          // If custom company link (e.g. ?empresa=loja), show client chat form
+          setCurrentView('client');
+        }
       }
     };
 
@@ -431,7 +454,22 @@ export default function App() {
     );
   }
 
-  // 4. Render Customer Support View (Default Live Chat for Customers)
+  // 4. Render Master Panel Login (Simple Login + Password for Master Administration)
+  if (currentView === 'master_login') {
+    return (
+      <MasterLoginScreen
+        companyId={companyId}
+        company={company}
+        onLoginSuccess={(user) => setCurrentUser(user)}
+        onOpenSuperAdmin={() => {
+          window.history.pushState({}, '', '?view=superadmin');
+          setIsSuperAdminView(true);
+        }}
+      />
+    );
+  }
+
+  // 5. Render Customer Support View (Default Live Chat for Customers)
   if (currentView === 'client') {
     const params = new URLSearchParams(window.location.search);
     const hasPortalAccess = params.get('portal') === 'true';
@@ -466,7 +504,7 @@ export default function App() {
     );
   }
 
-  // 5. Render Independent Employee Login View
+  // 6. Render Independent Employee Login View
   if (currentView === 'login') {
     const params = new URLSearchParams(window.location.search);
     const hasPortalAccess = params.get('portal') === 'true';
