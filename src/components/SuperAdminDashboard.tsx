@@ -20,10 +20,10 @@ interface SuperAdminDashboardProps {
 
 const DEFAULT_MASTER_COMPANY: Company = {
   id: 'atendepro_default',
-  name: 'Central de Atendimento',
+  name: 'Atendimento Online',
   slug: 'atendimento',
   logoUrl: '',
-  adminName: 'Administrador',
+  adminName: 'Administrador Master',
   adminPassword: 'admin',
   createdAt: '2026-06-01T00:00:00.000Z',
   license: {
@@ -128,35 +128,42 @@ export default function SuperAdminDashboard({
     const companiesColRef = collection(db, 'companies');
     const unsub = onSnapshot(companiesColRef, async (snapshot) => {
       const list: Company[] = [];
-      let hasDefault = false;
 
       snapshot.forEach((d) => {
         const c = { id: d.id, ...d.data() } as Company;
-        list.push(c);
-        if (c.id === 'atendepro_default') {
-          hasDefault = true;
-          // If default company still holds old initial template name, update it to clean "Atendimento Online"
-          if (c.name === 'Larissa Móveis' || c.name === 'Central de Atendimento') {
-            setDoc(doc(db, 'companies', 'atendepro_default'), {
-              name: 'Atendimento Online',
-              slug: 'atendimento',
-              logoUrl: ''
+        
+        // Clean up any residual Larissa Móveis references from Firestore database
+        if (c.id === 'atendepro_default' || (c.logoUrl && c.logoUrl.includes('8CdttXNK')) || c.name === 'Larissa Móveis' || c.adminName === 'Larissa') {
+          const isLarissa = c.name === 'Larissa Móveis' || c.adminName === 'Larissa' || (c.logoUrl && c.logoUrl.includes('8CdttXNK'));
+          if (isLarissa) {
+            setDoc(doc(db, 'companies', c.id), {
+              name: c.id === 'atendepro_default' ? 'Atendimento Online' : c.name,
+              slug: c.id === 'atendepro_default' ? 'atendimento' : c.slug,
+              logoUrl: '',
+              adminName: c.adminName === 'Larissa' ? 'Administrador Master' : c.adminName
             }, { merge: true }).catch(console.warn);
-            c.name = 'Atendimento Online';
-            c.slug = 'atendimento';
+
+            if (c.id === 'atendepro_default') {
+              c.name = 'Atendimento Online';
+              c.slug = 'atendimento';
+            }
+            if (c.adminName === 'Larissa') {
+              c.adminName = 'Administrador Master';
+            }
             c.logoUrl = '';
           }
         }
+
+        list.push(c);
       });
 
-      // If default company is missing from firestore, register it automatically
-      if (!hasDefault) {
+      // If database is completely empty, initialize master company once
+      if (snapshot.empty && list.length === 0) {
         try {
           await setDoc(doc(db, 'companies', 'atendepro_default'), DEFAULT_MASTER_COMPANY);
-          list.unshift(DEFAULT_MASTER_COMPANY);
+          list.push(DEFAULT_MASTER_COMPANY);
         } catch (e) {
           console.warn("Could not sync default company:", e);
-          list.unshift(DEFAULT_MASTER_COMPANY);
         }
       }
 
@@ -947,12 +954,16 @@ export default function SuperAdminDashboard({
                   {/* Company Info Left Column */}
                   <div className="flex items-start sm:items-center gap-4">
                     <div className="w-14 h-14 rounded-2xl bg-slate-950 border border-slate-700/80 p-1 flex items-center justify-center shrink-0 overflow-hidden shadow-inner">
-                      <img 
-                        src={comp.logoUrl || 'https://i.postimg.cc/8CdttXNK/Whats-App-Image-2026-06-10-at-14-30-14.jpg'} 
-                        referrerPolicy="no-referrer" 
-                        alt={comp.name} 
-                        className="w-full h-full object-cover rounded-xl"
-                      />
+                      {comp.logoUrl ? (
+                        <img 
+                          src={comp.logoUrl} 
+                          referrerPolicy="no-referrer" 
+                          alt={comp.name} 
+                          className="w-full h-full object-cover rounded-xl"
+                        />
+                      ) : (
+                        <Building2 className="w-7 h-7 text-indigo-400" />
+                      )}
                     </div>
 
                     <div className="space-y-1.5">
@@ -985,7 +996,7 @@ export default function SuperAdminDashboard({
                       </div>
 
                       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
-                        <span>Dono(a): <strong className="text-slate-200">{comp.adminName || 'Larissa'}</strong></span>
+                        <span>Dono(a): <strong className="text-slate-200">{comp.adminName || 'Administrador Master'}</strong></span>
                         {isLife ? (
                           <span className="text-purple-300 font-semibold flex items-center gap-1">
                             <InfinityIcon className="w-3 h-3" /> Licença Vitalícia
