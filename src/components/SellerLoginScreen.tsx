@@ -136,7 +136,7 @@ export default function SellerLoginScreen({
         return;
       }
 
-      // 4. If device not locked yet, register current device signature
+      // 4. If device not locked yet, register current device signature in background
       if (!targetSeller.deviceId) {
         const updatedSellerData: Partial<User> = {
           deviceId: currentDeviceId,
@@ -144,11 +144,10 @@ export default function SellerLoginScreen({
           lastDeviceName: currentDeviceName
         };
 
-        try {
-          await setDoc(doc(db, 'companies', companyId, 'users', targetSeller.id), sanitizeFirestoreData(updatedSellerData), { merge: true });
-        } catch (dbErr) {
+        // Fire and forget Firestore update (non-blocking for instant speed)
+        setDoc(doc(db, 'companies', companyId, 'users', targetSeller.id), sanitizeFirestoreData(updatedSellerData), { merge: true }).catch(dbErr => {
           console.warn("Aviso ao vincular dispositivo no Firestore:", dbErr);
-        }
+        });
 
         // Update local seller record
         targetSeller = {
@@ -166,7 +165,7 @@ export default function SellerLoginScreen({
         }
       }
 
-      // Login success!
+      // INSTANT Login success!
       onLoginSuccess(targetSeller);
 
     } catch (err) {

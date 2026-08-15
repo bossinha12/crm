@@ -72,14 +72,12 @@ export default function LoginScreen({
             createdAt: new Date().toISOString()
           };
 
-          try {
-            await setDoc(doc(db, 'companies', companyId, 'users', adminUser.id), sanitizeFirestoreData(adminUser), { merge: true });
-          } catch (syncErr) {
-            console.warn("Aviso ao sincronizar admin:", syncErr);
-          }
+          // Sync in background without blocking screen transition
+          setDoc(doc(db, 'companies', companyId, 'users', adminUser.id), sanitizeFirestoreData(adminUser), { merge: true }).catch(err => {
+            console.warn("Aviso ao sincronizar admin:", err);
+          });
 
           onLoginSuccess(adminUser);
-          setLoading(false);
           return;
         } else {
           setError('Senha de administrador/gerente incorreta.');

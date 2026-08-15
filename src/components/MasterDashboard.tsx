@@ -1564,10 +1564,23 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
                 
                 <div className="grow overflow-y-auto space-y-3 pr-1">
                   {registeredSellers.length === 0 ? (
-                    <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-400">
-                      <Users className="w-10 h-10 text-slate-300 mb-2" />
-                      <p className="font-semibold text-sm text-slate-600">Nenhum vendedor cadastrado ainda</p>
-                      <p className="text-xs text-slate-400 mt-1">Utilize o formulário ao lado para cadastrar seu primeiro atendente.</p>
+                    <div className="h-full flex flex-col items-center justify-center text-center p-6 bg-slate-50/70 rounded-2xl border-2 border-dashed border-slate-200">
+                      <div className="w-12 h-12 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 mb-3 shadow-sm">
+                        <Users className="w-6 h-6" />
+                      </div>
+                      <p className="font-bold text-sm text-slate-800">Nenhum vendedor cadastrado ainda</p>
+                      <p className="text-xs text-slate-500 max-w-sm mt-1 leading-relaxed">
+                        Digite o nome do seu vendedor no formulário ao lado e clique em <strong>"Gravar Vendedor"</strong>.
+                      </p>
+                      <div className="mt-4 p-3 bg-white border border-slate-200/80 rounded-xl text-left text-xs space-y-1.5 shadow-sm max-w-sm">
+                        <p className="font-bold text-slate-700 flex items-center gap-1.5">
+                          <RotateCcw className="w-3.5 h-3.5 text-amber-600" />
+                          <span>Onde fica o botão de Resetar Aparelho?</span>
+                        </p>
+                        <p className="text-slate-500 text-[11px] leading-normal">
+                          Assim que você cadastrar o vendedor, ele aparecerá nesta lista com o botão <strong>"🔄 Resetar Aparelho"</strong> ao lado do nome dele, pronto para ser usado quando o funcionário trocar de celular.
+                        </p>
+                      </div>
                     </div>
                   ) : (
                     registeredSellers.map((item) => {
