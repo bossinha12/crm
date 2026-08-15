@@ -43,6 +43,9 @@ export interface User {
   role: 'admin' | 'seller';
   createdAt: string;
   activeChatsCount?: number;
+  deviceId?: string | null;
+  deviceRegisteredAt?: string | null;
+  lastDeviceName?: string | null;
 }
 
 export interface Chat {

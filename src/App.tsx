@@ -4,6 +4,7 @@ import { db, auth, testFirestoreConnection } from './lib/firebase';
 import { signInAnonymously } from 'firebase/auth';
 import { User, Company } from './types';
 import MasterLoginScreen from './components/MasterLoginScreen';
+import SellerLoginScreen from './components/SellerLoginScreen';
 import LoginScreen from './components/LoginScreen';
 import ClientWidget from './components/ClientWidget';
 import SellerDashboard from './components/SellerDashboard';
@@ -64,14 +65,21 @@ export default function App() {
     }
   }, [currentUser, companyId]);
   
-  // Views navigation selection: 'home' | 'client' | 'login' | 'master_login'
+  // Views navigation selection: 'home' | 'client' | 'vendedor' | 'gerente' | 'master_login'
   const isMasterRoot = companyId === 'atendepro_default';
-  const [currentView, setCurrentView] = useState<'home' | 'client' | 'login' | 'master_login'>(() => {
+  const [currentView, setCurrentView] = useState<'home' | 'client' | 'vendedor' | 'gerente' | 'master_login'>(() => {
     const params = new URLSearchParams(window.location.search);
     const viewParam = params.get('view');
+    const roleParam = (params.get('role') || params.get('tipo') || '').toLowerCase();
     const customComp = params.get('empresa') || params.get('company') || params.get('slug');
+
     if (viewParam === 'client') return 'client';
-    if (viewParam === 'login') return 'login';
+    if (viewParam === 'gerente' || viewParam === 'dono' || viewParam === 'owner' || roleParam === 'gerente' || roleParam === 'dono' || roleParam === 'admin') {
+      return 'gerente';
+    }
+    if (viewParam === 'vendedor' || viewParam === 'seller' || viewParam === 'login') {
+      return 'vendedor';
+    }
     if (viewParam === 'portal') return 'home';
     if (!customComp) return 'master_login';
     return 'client';
@@ -84,6 +92,7 @@ export default function App() {
       const params = new URLSearchParams(window.location.search);
       const hash = window.location.hash.toLowerCase();
       const viewParam = params.get('view');
+      const roleParam = (params.get('role') || params.get('tipo') || '').toLowerCase();
       const isSuper = params.get('superadmin') === 'true' || 
                       params.get('admin') === 'super' || 
                       viewParam === 'superadmin' || 
@@ -105,9 +114,12 @@ export default function App() {
       if (isSuper) {
         setIsSuperAdminView(true);
         document.title = 'Painel de Licenças | Gestão de Empresas';
-      } else if (viewParam === 'login' || hash.includes('login')) {
+      } else if (viewParam === 'gerente' || viewParam === 'dono' || viewParam === 'owner' || roleParam === 'gerente' || roleParam === 'dono' || roleParam === 'admin') {
         setIsSuperAdminView(false);
-        setCurrentView(activeCompId === 'atendepro_default' ? 'master_login' : 'login');
+        setCurrentView('gerente');
+      } else if (viewParam === 'vendedor' || viewParam === 'seller' || viewParam === 'login' || hash.includes('login') || hash.includes('vendedor')) {
+        setIsSuperAdminView(false);
+        setCurrentView(activeCompId === 'atendepro_default' ? 'master_login' : 'vendedor');
       } else if (viewParam === 'portal' || hash.includes('portal')) {
         setIsSuperAdminView(false);
         setCurrentView('home');
@@ -504,40 +516,54 @@ export default function App() {
     );
   }
 
-  // 6. Render Independent Employee Login View
-  if (currentView === 'login') {
-    const params = new URLSearchParams(window.location.search);
-    const hasPortalAccess = params.get('portal') === 'true';
-
+  // 6. Render Dedicated Seller Login (Name only + Device Lock)
+  if (currentView === 'vendedor') {
     return (
-      <main className="min-h-screen bg-slate-100 flex flex-col justify-between p-4 sm:p-6 font-sans leading-relaxed relative">
-        {hasPortalAccess ? (
-          <div className="w-full flex justify-start">
-            <button
-              onClick={() => {
-                const newParams = new URLSearchParams(window.location.search);
-                newParams.set('view', 'portal');
-                window.history.pushState({}, '', `?${newParams.toString()}`);
-                setCurrentView('home');
-              }}
-              className="text-xs font-semibold bg-white border border-slate-200 text-slate-500 hover:text-slate-800 px-3.5 py-2 rounded-xl transition-colors cursor-pointer shadow-sm"
-            >
-              ← Voltar para o Início
-            </button>
-          </div>
-        ) : (
-          <div className="h-2" />
-        )}
+      <main className="min-h-screen bg-slate-100 flex flex-col justify-center items-center p-4 font-sans leading-relaxed relative">
+        <SellerLoginScreen
+          companyId={companyId}
+          company={company}
+          onLoginSuccess={(user) => setCurrentUser(user)}
+          onSwitchToOwnerLogin={() => {
+            const newParams = new URLSearchParams(window.location.search);
+            newParams.set('view', 'gerente');
+            window.history.pushState({}, '', `?${newParams.toString()}`);
+            setCurrentView('gerente');
+          }}
+        />
 
-        <div className="my-auto w-full flex items-center justify-center">
-          <LoginScreen 
-            companyId={companyId} 
-            company={company}
-            onLoginSuccess={(user) => setCurrentUser(user)} 
-          />
+        <div className="mt-4 text-center">
+          <button
+            onClick={() => {
+              window.history.pushState({}, '', '?view=superadmin');
+              setIsSuperAdminView(true);
+            }}
+            className="text-[11px] text-slate-400 hover:text-slate-600 transition-colors font-medium cursor-pointer"
+          >
+            🔒 Gerenciador de Licenças (Super Admin)
+          </button>
         </div>
+      </main>
+    );
+  }
 
-        <div className="text-center py-2">
+  // 7. Render Owner / Manager Login (Username + Password)
+  if (currentView === 'gerente') {
+    return (
+      <main className="min-h-screen bg-slate-100 flex flex-col justify-center items-center p-4 font-sans leading-relaxed relative">
+        <LoginScreen 
+          companyId={companyId} 
+          company={company}
+          onLoginSuccess={(user) => setCurrentUser(user)}
+          onSwitchToSellerLogin={() => {
+            const newParams = new URLSearchParams(window.location.search);
+            newParams.set('view', 'vendedor');
+            window.history.pushState({}, '', `?${newParams.toString()}`);
+            setCurrentView('vendedor');
+          }}
+        />
+
+        <div className="mt-4 text-center">
           <button
             onClick={() => {
               window.history.pushState({}, '', '?view=superadmin');

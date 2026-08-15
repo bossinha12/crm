@@ -935,8 +935,8 @@ export default function SuperAdminDashboard({
               const licenseInfo = getLicenseInfo(comp.license);
 
               const clientUrl = `${baseUrl}/?empresa=${slug}&view=client`;
-              const loginUrl = `${baseUrl}/?empresa=${slug}&view=login`;
-              const ownerUrl = `${baseUrl}/?empresa=${slug}&view=login&role=gerente`;
+              const loginUrl = `${baseUrl}/?empresa=${slug}&view=vendedor`;
+              const ownerUrl = `${baseUrl}/?empresa=${slug}&view=gerente`;
 
               return (
                 <div 
