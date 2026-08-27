@@ -8,7 +8,7 @@ import {
   MessageSquare, User as UserIcon, Send, LogOut, Phone, ShieldClose, 
   Volume2, VolumeX, Sparkles, Copy, Check, CheckSquare,
   Image as ImageIcon, Camera, Loader2, ExternalLink, X, ShieldCheck, Megaphone,
-  Upload, CheckCircle
+  Upload, CheckCircle, BellRing, PhoneCall
 } from 'lucide-react';
 import InternalTeamChat from './InternalTeamChat';
 
@@ -67,8 +67,14 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
     
     if (!nextMuted) {
       crmAlarm.playTestBeep();
-      const hasPending = chatsRef.current.some(c => c.status === ChatStatus.NEW);
-      if (hasPending) {
+      const hasUnassignedNew = chatsRef.current.some(c => c.status === ChatStatus.NEW);
+      const hasUnreadClientMsg = chatsRef.current.some(c => 
+        c.status === ChatStatus.ACTIVE && 
+        c.sellerId === sellerUser.id && 
+        c.unreadBySeller && 
+        c.lastMessageSender === 'client'
+      );
+      if (hasUnassignedNew || hasUnreadClientMsg) {
         setAlarmIsSounding(true);
         crmAlarm.start();
       }
@@ -103,8 +109,18 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
         const item = { id: d.id, ...d.data() } as Chat;
         list.push(item);
 
-        // Check if there are unassigned waiting calls to beep-alert the console
+        // 1. Unassigned new chat waiting for any seller to claim:
         if (item.status === ChatStatus.NEW) {
+          pendingAlertCount++;
+        }
+
+        // 2. Active chat assigned to this seller with unread message from the external client:
+        if (
+          item.status === ChatStatus.ACTIVE &&
+          item.sellerId === sellerUser.id &&
+          item.unreadBySeller === true &&
+          item.lastMessageSender === 'client'
+        ) {
           pendingAlertCount++;
         }
       });
@@ -118,7 +134,7 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
 
       setAvailableChats(list);
 
-      // Sound management rules: Alarm rings if there are pending chats in status 'new' and sound is not muted
+      // Sound management rules: Alarm rings in loop if there are pending unassigned calls OR unread client messages
       if (pendingAlertCount > 0 && !crmAlarm.getMuted()) {
         setAlarmIsSounding(true);
         crmAlarm.start();
@@ -134,7 +150,7 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
       unsub();
       crmAlarm.stop();
     };
-  }, [companyId]);
+  }, [companyId, sellerUser.id]);
 
   // Hook to log out if the seller's user document is deleted from Firestore (server confirmed)
   useEffect(() => {
@@ -477,9 +493,24 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
     setTimeout(() => setIsCopied(false), 2000);
   };
 
+  const handleSelectChat = async (chatId: string) => {
+    setSelectedChatId(chatId);
+    try {
+      const chatDocRef = doc(db, 'companies', companyId, 'chats', chatId);
+      await updateDoc(chatDocRef, sanitizeFirestoreData({ 
+        unreadBySeller: false,
+        updatedAt: new Date().toISOString()
+      }));
+    } catch (e) {
+      console.log("Erro ao marcar lido ao selecionar chat:", e);
+    }
+  };
+
   const currentChat = chats.find(c => c.id === selectedChatId);
   const claimableChats = chats.filter(c => c.status === ChatStatus.NEW);
   const myActiveChats = chats.filter(c => c.status === ChatStatus.ACTIVE && c.sellerId === sellerUser.id);
+  const unreadClientChats = myActiveChats.filter(c => c.unreadBySeller && c.lastMessageSender === 'client');
+  const totalPendingAttention = claimableChats.length + unreadClientChats.length;
 
   const currentLogo = company?.logoUrl || '';
   const currentName = company?.name || 'Atendimento Online';
@@ -651,6 +682,67 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
         </div>
       )}
 
+      {/* Active Sound Loop Alert Banner for Incoming External Client Calls/Messages */}
+      {alarmIsSounding && totalPendingAttention > 0 && (
+        <div className="bg-gradient-to-r from-rose-600 via-amber-600 to-rose-600 bg-[length:200%_auto] text-white rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-xl shadow-rose-600/30 border-2 border-rose-300 animate-pulse">
+          <div className="flex items-center gap-3.5">
+            <div className="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center shrink-0 animate-bounce">
+              <BellRing className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] uppercase font-black px-2.5 py-0.5 rounded-full bg-white text-rose-700 tracking-wider">
+                  Alarme Sonoro em Loop
+                </span>
+                <span className="text-xs font-bold text-rose-100 flex items-center gap-1.5">
+                  <Volume2 className="w-3.5 h-3.5 animate-ping" /> Chamando sem parar
+                </span>
+              </div>
+              <p className="text-sm font-extrabold text-white mt-1">
+                {claimableChats.length > 0 && `${claimableChats.length} novo(s) cliente(s) aguardando na fila.`}
+                {claimableChats.length > 0 && unreadClientChats.length > 0 && ' • '}
+                {unreadClientChats.length > 0 && `${unreadClientChats.length} cliente(s) com mensagem não atendida.`}
+                <span className="text-xs font-normal text-rose-100 block sm:inline sm:ml-2">
+                  (O alarme só para quando você atender ou abrir o chat)
+                </span>
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 w-full sm:w-auto shrink-0 justify-end">
+            {claimableChats.length > 0 && (
+              <button
+                type="button"
+                onClick={() => handleClaimChat(claimableChats[0])}
+                className="px-4 py-2 bg-white text-rose-700 hover:bg-rose-50 text-xs font-black rounded-xl transition-all shadow-md active:scale-95 cursor-pointer flex items-center gap-1.5"
+              >
+                <PhoneCall className="w-4 h-4" />
+                <span>Atender Chamado Agora</span>
+              </button>
+            )}
+            {claimableChats.length === 0 && unreadClientChats.length > 0 && (
+              <button
+                type="button"
+                onClick={() => handleSelectChat(unreadClientChats[0].id)}
+                className="px-4 py-2 bg-white text-rose-700 hover:bg-rose-50 text-xs font-black rounded-xl transition-all shadow-md active:scale-95 cursor-pointer flex items-center gap-1.5"
+              >
+                <MessageSquare className="w-4 h-4" />
+                <span>Abrir Mensagem ({unreadClientChats[0].clientName})</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={toggleSound}
+              className="px-3 py-2 bg-black/30 hover:bg-black/40 text-white text-xs font-bold rounded-xl transition-all border border-white/20 flex items-center gap-1.5 cursor-pointer"
+              title="Silenciar alarme temporariamente"
+            >
+              <VolumeX className="w-4 h-4" />
+              <span>Silenciar</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Internal Management Notice Banner (if there are unread messages) */}
       {unreadInternalMsgs > 0 && (
         <div 
@@ -735,30 +827,42 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
               <div className="space-y-2.5 overflow-y-auto grow max-h-[350px]">
                 {myActiveChats.map((c) => {
                   const isActiveTab = c.id === selectedChatId;
+                  const hasUnreadClientMsg = c.unreadBySeller && c.lastMessageSender === 'client';
                   return (
                     <button
                       key={c.id}
-                      onClick={() => setSelectedChatId(c.id)}
+                      onClick={() => handleSelectChat(c.id)}
                       className={`w-full text-left p-3.5 rounded-xl border flex items-center justify-between gap-4 transition-all relative cursor-pointer ${
                         isActiveTab
                           ? 'border-indigo-500 bg-indigo-50/30'
+                          : hasUnreadClientMsg
+                          ? 'border-rose-300 bg-rose-50/50 hover:bg-rose-50'
                           : 'border-slate-100 hover:bg-slate-50'
                       }`}
                     >
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5">
-                          <span className="font-bold text-sm text-slate-800 truncate">{c.clientName}</span>
+                          <span className={`font-bold text-sm truncate ${hasUnreadClientMsg ? 'text-rose-900' : 'text-slate-800'}`}>
+                            {c.clientName}
+                          </span>
                           {c.clientPhone && (
                             <span className="text-[10px] text-slate-400 shrink-0">({c.clientPhone})</span>
                           )}
                         </div>
-                        <p className="text-xs text-slate-500 truncate mt-0.5">{c.lastMessage || 'Nenhuma conversa ainda...'}</p>
+                        <p className={`text-xs truncate mt-0.5 ${hasUnreadClientMsg ? 'text-rose-700 font-semibold' : 'text-slate-500'}`}>
+                          {c.lastMessage || 'Nenhuma conversa ainda...'}
+                        </p>
                       </div>
 
-                      {/* Red notification dots for unread bubbles */}
-                      {c.unreadBySeller && (
+                      {/* Red notification badge for unread client messages */}
+                      {hasUnreadClientMsg ? (
+                        <div className="flex items-center gap-1 bg-rose-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full shrink-0 animate-bounce shadow-sm">
+                          <BellRing className="w-2.5 h-2.5" />
+                          <span>Nova Msg</span>
+                        </div>
+                      ) : c.unreadBySeller ? (
                         <div className="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0"></div>
-                      )}
+                      ) : null}
                     </button>
                   );
                 })}
