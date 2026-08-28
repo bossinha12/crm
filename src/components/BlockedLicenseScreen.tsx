@@ -95,6 +95,13 @@ export default function BlockedLicenseScreen({
         </div>
 
       </div>
+
+      {/* Assinatura Bossa Infor - Discreta e Legível */}
+      <div className="mt-6 flex flex-col items-center gap-1 z-10 text-center px-4">
+        <p className="text-xs text-slate-300 font-medium tracking-wide">
+          Produto da empresa <span className="font-bold text-white">Bossa Infor</span>
+        </p>
+      </div>
     </main>
   );
 }

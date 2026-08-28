@@ -230,9 +230,15 @@ export default function MasterLoginScreen({
 
       </div>
 
-      <p className="text-[11px] text-slate-500 mt-6 text-center">
-        Atendimento Online • Sistema Seguro de Gestão
-      </p>
+      {/* Assinatura Bossa Infor - Discreta e Legível */}
+      <div className="mt-6 flex flex-col items-center gap-1 z-10 text-center px-4">
+        <p className="text-xs text-slate-300 font-medium tracking-wide">
+          Produto da empresa <span className="font-bold text-white">Bossa Infor</span>
+        </p>
+        <p className="text-[11px] text-slate-500">
+          Atendimento Online • Sistema Seguro de Gestão
+        </p>
+      </div>
     </div>
   );
 }

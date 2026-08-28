@@ -238,9 +238,15 @@ export default function LoginScreen({
 
       </div>
 
-      <p className="text-[11px] text-slate-400 mt-4 text-center">
-        {companyName} • Gestão Comercial & Controle
-      </p>
+      {/* Assinatura Bossa Infor - Discreta e Legível */}
+      <div className="mt-5 flex flex-col items-center gap-0.5 text-center px-4">
+        <p className="text-xs text-slate-600 font-medium tracking-wide">
+          Produto da empresa <span className="font-bold text-slate-800">Bossa Infor</span>
+        </p>
+        <p className="text-[11px] text-slate-400 font-medium">
+          {companyName} • Gestão Comercial & Controle
+        </p>
+      </div>
     </div>
   );
 }

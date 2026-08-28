@@ -664,7 +664,11 @@ export default function App() {
         </div>
 
         {/* Informative Footer Badge and Super Admin Access */}
-        <div className="flex flex-col items-center gap-2">
+        <div className="flex flex-col items-center gap-1.5">
+          <p className="text-xs text-slate-600 font-medium tracking-wide">
+            Produto da empresa <span className="font-bold text-slate-800">Bossa Infor</span>
+          </p>
+
           <div className="text-[11px] text-slate-400 flex justify-center items-center gap-1">
             <HelpCircle className="w-3.5 h-3.5" />
             <span>Fidelidade instantânea de conexões e sincronização em tempo real via Firestore</span>
@@ -675,7 +679,7 @@ export default function App() {
               window.history.pushState({}, '', '?view=superadmin');
               setIsSuperAdminView(true);
             }}
-            className="text-[11px] text-slate-400 hover:text-slate-600 transition-colors font-medium flex items-center gap-1 mt-2 cursor-pointer"
+            className="text-[11px] text-slate-400 hover:text-slate-600 transition-colors font-medium flex items-center gap-1 mt-0.5 cursor-pointer"
           >
             <ShieldCheck className="w-3 h-3 text-indigo-500" />
             <span>Painel Super Admin • Gestão de Licenças e Empresas</span>
