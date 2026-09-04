@@ -48,7 +48,16 @@ export default function App() {
                   localStorage.getItem('crm_current_user_atendepro');
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed: User = JSON.parse(saved);
+        if (parsed && !parsed.avatarUrl) {
+          const savedAvatar = localStorage.getItem(`crm_seller_avatar_${activeId}_${parsed.id}`) || 
+                              localStorage.getItem(`crm_seller_avatar_${parsed.name.trim().toLowerCase()}`) ||
+                              localStorage.getItem(`crm_seller_avatar_global_${parsed.id}`);
+          if (savedAvatar) {
+            parsed.avatarUrl = savedAvatar;
+          }
+        }
+        return parsed;
       } catch (e) {
         console.error("Erro ao recuperar sessão:", e);
       }
@@ -60,10 +69,32 @@ export default function App() {
   useEffect(() => {
     if (currentUser) {
       localStorage.setItem(`crm_current_user_${companyId}`, JSON.stringify(currentUser));
+      if (currentUser.avatarUrl) {
+        localStorage.setItem(`crm_seller_avatar_${companyId}_${currentUser.id}`, currentUser.avatarUrl);
+        localStorage.setItem(`crm_seller_avatar_${currentUser.name.trim().toLowerCase()}`, currentUser.avatarUrl);
+        localStorage.setItem(`crm_seller_avatar_global_${currentUser.id}`, currentUser.avatarUrl);
+      }
     } else {
       localStorage.removeItem(`crm_current_user_${companyId}`);
     }
   }, [currentUser, companyId]);
+
+  // Real-time synchronization of currentUser with Firestore (avatar and profile updates)
+  useEffect(() => {
+    if (!currentUser?.id || currentUser.id === 'admin-larissa') return;
+    const userDocRef = doc(db, 'companies', companyId, 'users', currentUser.id);
+    const unsub = onSnapshot(userDocRef, (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data?.avatarUrl && data.avatarUrl !== currentUser.avatarUrl) {
+          setCurrentUser(prev => prev ? { ...prev, avatarUrl: data.avatarUrl } : null);
+        }
+      }
+    }, (err) => {
+      console.warn("Aviso ao sincronizar perfil do usuário no App:", err);
+    });
+    return () => unsub();
+  }, [currentUser?.id, companyId]);
   
   // Views navigation selection: 'home' | 'client' | 'vendedor' | 'gerente' | 'master_login'
   const isMasterRoot = companyId === 'atendepro_default';
@@ -459,6 +490,7 @@ export default function App() {
               company={company}
               sellerUser={currentUser} 
               onLogout={() => setCurrentUser(null)} 
+              onUpdateUser={(updated) => setCurrentUser(updated)}
             />
           )}
         </div>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, getDocs, doc, setDoc, onSnapshot } from 'firebase/firestore';
+import { collection, getDocs, doc, setDoc, onSnapshot, getDoc } from 'firebase/firestore';
 import { db, sanitizeFirestoreData } from '../lib/firebase';
 import { User, Company } from '../types';
 import { getOrCreateDeviceId, getDeviceDescription } from '../lib/deviceId';
@@ -164,6 +164,36 @@ export default function SellerLoginScreen({
           } catch (e) {}
         }
       }
+
+      // Retrieve persistent avatarUrl if missing from targetSeller
+      if (!targetSeller.avatarUrl) {
+        const storedAvatar = localStorage.getItem(`crm_seller_avatar_${companyId}_${targetSeller.id}`) ||
+                             localStorage.getItem(`crm_seller_avatar_${targetSeller.name.trim().toLowerCase()}`) ||
+                             localStorage.getItem(`crm_seller_avatar_global_${targetSeller.id}`);
+        if (storedAvatar) {
+          targetSeller.avatarUrl = storedAvatar;
+        }
+      }
+
+      // If still missing, check Firestore user document directly
+      if (!targetSeller.avatarUrl) {
+        try {
+          const uDoc = await getDoc(doc(db, 'companies', companyId, 'users', targetSeller.id));
+          if (uDoc.exists() && uDoc.data()?.avatarUrl) {
+            targetSeller.avatarUrl = uDoc.data().avatarUrl;
+          }
+        } catch (e) {}
+      }
+
+      if (targetSeller.avatarUrl) {
+        localStorage.setItem(`crm_seller_avatar_${companyId}_${targetSeller.id}`, targetSeller.avatarUrl);
+        localStorage.setItem(`crm_seller_avatar_${targetSeller.name.trim().toLowerCase()}`, targetSeller.avatarUrl);
+        localStorage.setItem(`crm_seller_avatar_global_${targetSeller.id}`, targetSeller.avatarUrl);
+      }
+
+      // Save user session in localStorage
+      localStorage.setItem(`crm_current_user_${companyId}`, JSON.stringify(targetSeller));
+      localStorage.setItem('crm_current_user_atendepro', JSON.stringify(targetSeller));
 
       // INSTANT Login success!
       onLoginSuccess(targetSeller);

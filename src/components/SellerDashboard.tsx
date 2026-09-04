@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { collection, onSnapshot, query, orderBy, doc, updateDoc, addDoc, getDoc } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, doc, updateDoc, addDoc, getDoc, setDoc, getDocs } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, sanitizeFirestoreData } from '../lib/firebase';
 import { uploadToImgBB } from '../lib/imgbb';
 import { Chat, User, Message, ChatStatus, Company } from '../types';
@@ -17,9 +17,10 @@ interface SellerDashboardProps {
   company?: Company | null;
   sellerUser: User;
   onLogout: () => void;
+  onUpdateUser?: (user: User) => void;
 }
 
-export default function SellerDashboard({ companyId, company, sellerUser, onLogout }: SellerDashboardProps) {
+export default function SellerDashboard({ companyId, company, sellerUser, onLogout, onUpdateUser }: SellerDashboardProps) {
   const [chats, setAvailableChats] = useState<Chat[]>([]);
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [selectedChatMessages, setSelectedChatMessages] = useState<Message[]>([]);
@@ -27,8 +28,29 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
   const [alarmIsSounding, setAlarmIsSounding] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
 
+  // Persistent avatar storage keys
+  const avatarStorageKey = `crm_seller_avatar_${companyId}_${sellerUser.id}`;
+  const avatarNameKey = `crm_seller_avatar_${sellerUser.name.trim().toLowerCase()}`;
+  const avatarGlobalKey = `crm_seller_avatar_global_${sellerUser.id}`;
+
   // Seller Profile Photo State
-  const [sellerAvatar, setSellerAvatar] = useState<string | null>(sellerUser.avatarUrl || null);
+  const [sellerAvatar, setSellerAvatar] = useState<string | null>(() => {
+    if (sellerUser.avatarUrl) return sellerUser.avatarUrl;
+    const fromStorage = localStorage.getItem(avatarStorageKey) || 
+                        localStorage.getItem(avatarNameKey) || 
+                        localStorage.getItem(avatarGlobalKey);
+    if (fromStorage) return fromStorage;
+
+    const savedLocal = localStorage.getItem(`atendepro_local_users_${companyId}`) || localStorage.getItem('atendepro_local_users');
+    if (savedLocal) {
+      try {
+        const localList: User[] = JSON.parse(savedLocal);
+        const match = localList.find(u => u.id === sellerUser.id || u.name.trim().toLowerCase() === sellerUser.name.trim().toLowerCase());
+        if (match?.avatarUrl) return match.avatarUrl;
+      } catch (e) {}
+    }
+    return null;
+  });
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const [avatarSuccessMsg, setAvatarSuccessMsg] = useState<string | null>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
@@ -152,12 +174,65 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
     };
   }, [companyId, sellerUser.id]);
 
-  // Hook to log out if the seller's user document is deleted from Firestore (server confirmed)
+  // Automatically fetch remote avatar from Firestore on boot to guarantee persistence
+  useEffect(() => {
+    let isMounted = true;
+    const fetchRemoteAvatar = async () => {
+      try {
+        // 1. Check direct document by sellerUser.id
+        const userDocRef = doc(db, 'companies', companyId, 'users', sellerUser.id);
+        const snap = await getDoc(userDocRef);
+        if (snap.exists()) {
+          const data = snap.data();
+          if (data?.avatarUrl && isMounted) {
+            setSellerAvatar(data.avatarUrl);
+            localStorage.setItem(avatarStorageKey, data.avatarUrl);
+            localStorage.setItem(avatarNameKey, data.avatarUrl);
+            localStorage.setItem(avatarGlobalKey, data.avatarUrl);
+            onUpdateUser?.({ ...sellerUser, avatarUrl: data.avatarUrl });
+            return;
+          }
+        }
+
+        // 2. Search users collection by name in case document ID was generated differently
+        const usersCol = collection(db, 'companies', companyId, 'users');
+        const querySnap = await getDocs(usersCol);
+        querySnap.forEach((d) => {
+          const u = d.data();
+          if (u.name && u.name.trim().toLowerCase() === sellerUser.name.trim().toLowerCase() && u.avatarUrl) {
+            if (isMounted) {
+              setSellerAvatar(u.avatarUrl);
+              localStorage.setItem(avatarStorageKey, u.avatarUrl);
+              localStorage.setItem(avatarNameKey, u.avatarUrl);
+              localStorage.setItem(avatarGlobalKey, u.avatarUrl);
+              onUpdateUser?.({ ...sellerUser, avatarUrl: u.avatarUrl });
+            }
+          }
+        });
+      } catch (e) {
+        console.warn("Aviso ao buscar avatar remoto no Firestore:", e);
+      }
+    };
+
+    fetchRemoteAvatar();
+    return () => { isMounted = false; };
+  }, [companyId, sellerUser.id, sellerUser.name]);
+
+  // Hook to log out if the seller's user document is deleted from Firestore, and sync avatar in real time
   useEffect(() => {
     if (sellerUser.id === 'admin-larissa') return;
     const userDocRef = doc(db, 'companies', companyId, 'users', sellerUser.id);
     const unsubUser = onSnapshot(userDocRef, (snapshot: any) => {
-      if (!snapshot.exists() && !snapshot.metadata?.fromCache) {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        if (data?.avatarUrl && data.avatarUrl !== sellerAvatar) {
+          setSellerAvatar(data.avatarUrl);
+          localStorage.setItem(avatarStorageKey, data.avatarUrl);
+          localStorage.setItem(avatarNameKey, data.avatarUrl);
+          localStorage.setItem(avatarGlobalKey, data.avatarUrl);
+          onUpdateUser?.({ ...sellerUser, avatarUrl: data.avatarUrl });
+        }
+      } else if (!snapshot.metadata?.fromCache) {
         alert("Atenção: Seu perfil de vendedor foi removido pelo administrador. Você foi desconectado.");
         onLogout();
       }
@@ -165,9 +240,9 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
       console.warn("Aviso ao monitorar perfil do vendedor no Firestore:", error);
     });
     return () => unsubUser();
-  }, [sellerUser.id, companyId, onLogout]);
+  }, [sellerUser.id, companyId, onLogout, sellerAvatar]);
 
-  // Load all sellers for the company context
+  // Load all sellers for the company context and sync avatar if found
   useEffect(() => {
     const usersCol = collection(db, 'companies', companyId, 'users');
     const unsubUsers = onSnapshot(usersCol, (snapshot) => {
@@ -176,12 +251,33 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
         list.push({ id: d.id, ...d.data() } as User);
       });
       setCompanySellers(list);
+
+      // Check if current seller has avatarUrl in the loaded list
+      const me = list.find(u => u.id === sellerUser.id || u.name.trim().toLowerCase() === sellerUser.name.trim().toLowerCase());
+      if (me?.avatarUrl && me.avatarUrl !== sellerAvatar) {
+        setSellerAvatar(me.avatarUrl);
+        localStorage.setItem(avatarStorageKey, me.avatarUrl);
+        localStorage.setItem(avatarNameKey, me.avatarUrl);
+        localStorage.setItem(avatarGlobalKey, me.avatarUrl);
+        onUpdateUser?.({ ...sellerUser, avatarUrl: me.avatarUrl });
+      }
     }, (error) => {
       console.warn("Aviso ao carregar vendedores:", error);
     });
 
     return () => unsubUsers();
-  }, [companyId]);
+  }, [companyId, sellerAvatar]);
+
+  // Automatically propagate sellerAvatar to any active chats assigned to this seller
+  useEffect(() => {
+    if (!sellerAvatar) return;
+    chats.forEach(c => {
+      if ((c.sellerId === sellerUser.id || c.sellerName === sellerUser.name) && c.sellerAvatar !== sellerAvatar) {
+        const cRef = doc(db, 'companies', companyId, 'chats', c.id);
+        updateDoc(cRef, { sellerAvatar: sellerAvatar }).catch(() => {});
+      }
+    });
+  }, [chats, sellerAvatar, companyId, sellerUser.id, sellerUser.name]);
 
   // Real-time listener for internal messages from Admin / Management to this Seller or to 'all'
   useEffect(() => {
@@ -295,32 +391,63 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
       const uploadedUrl = await uploadToImgBB(file);
       setSellerAvatar(uploadedUrl);
 
-      // 2. Update Firestore User Profile
-      const userDocRef = doc(db, 'companies', companyId, 'users', sellerUser.id);
-      await updateDoc(userDocRef, sanitizeFirestoreData({
-        avatarUrl: uploadedUrl
-      })).catch(err => console.warn("Aviso ao salvar avatar no Firestore:", err));
+      // 2. Persistent storage keys (resilient across sessions and devices)
+      localStorage.setItem(avatarStorageKey, uploadedUrl);
+      localStorage.setItem(avatarNameKey, uploadedUrl);
+      localStorage.setItem(avatarGlobalKey, uploadedUrl);
+
+      // Update current user session
+      const updatedUser: User = { ...sellerUser, avatarUrl: uploadedUrl };
+      localStorage.setItem(`crm_current_user_${companyId}`, JSON.stringify(updatedUser));
+      localStorage.setItem('crm_current_user_atendepro', JSON.stringify(updatedUser));
+      onUpdateUser?.(updatedUser);
 
       // 3. Update localStorage users list
       const savedLocal = localStorage.getItem(`atendepro_local_users_${companyId}`) || localStorage.getItem('atendepro_local_users');
       if (savedLocal) {
         try {
           let localList: User[] = JSON.parse(savedLocal);
-          localList = localList.map(u => u.id === sellerUser.id ? { ...u, avatarUrl: uploadedUrl } : u);
+          localList = localList.map(u => 
+            (u.id === sellerUser.id || u.name.trim().toLowerCase() === sellerUser.name.trim().toLowerCase()) 
+              ? { ...u, avatarUrl: uploadedUrl } 
+              : u
+          );
           localStorage.setItem(`atendepro_local_users_${companyId}`, JSON.stringify(localList));
           localStorage.setItem('atendepro_local_users', JSON.stringify(localList));
         } catch (e) {}
       }
 
-      // 4. Update current active chats in Firestore with the new avatar
+      // 4. Update Firestore User Profile (using setDoc with merge: true so it creates or updates safely)
+      const userDocRef = doc(db, 'companies', companyId, 'users', sellerUser.id);
+      await setDoc(userDocRef, sanitizeFirestoreData({
+        id: sellerUser.id,
+        name: sellerUser.name,
+        role: 'seller',
+        avatarUrl: uploadedUrl,
+        updatedAt: new Date().toISOString()
+      }), { merge: true }).catch(err => console.warn("Aviso ao salvar avatar no Firestore por ID:", err));
+
+      // Also search by name in Firestore users in case the seller doc ID is different
+      try {
+        const usersCol = collection(db, 'companies', companyId, 'users');
+        const snap = await getDocs(usersCol);
+        snap.forEach(d => {
+          const u = d.data();
+          if (u.name && u.name.trim().toLowerCase() === sellerUser.name.trim().toLowerCase() && d.id !== sellerUser.id) {
+            setDoc(doc(db, 'companies', companyId, 'users', d.id), { avatarUrl: uploadedUrl }, { merge: true }).catch(() => {});
+          }
+        });
+      } catch (e) {}
+
+      // 5. Update current active chats in Firestore with the new avatar
       chatsRef.current.forEach(c => {
-        if (c.sellerId === sellerUser.id) {
+        if (c.sellerId === sellerUser.id || c.sellerName === sellerUser.name) {
           const cRef = doc(db, 'companies', companyId, 'chats', c.id);
           updateDoc(cRef, { sellerAvatar: uploadedUrl }).catch(() => {});
         }
       });
 
-      setAvatarSuccessMsg('Sua foto de perfil foi atualizada com sucesso! Seus clientes agora a verão no chat.');
+      setAvatarSuccessMsg('Sua foto de perfil foi salva com sucesso no ImgBB e no sistema! Ela permanecerá salva permanentemente.');
       setTimeout(() => setAvatarSuccessMsg(null), 5000);
     } catch (err) {
       console.error("Erro ao enviar foto de perfil:", err);
@@ -431,6 +558,7 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
         companyId,
         senderType: 'seller',
         senderName: sellerUser.name,
+        senderAvatar: sellerAvatar || sellerUser.avatarUrl || null,
         text: '📷 Foto do produto enviada',
         imageUrl,
         createdAt: new Date().toISOString()
@@ -441,6 +569,7 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
         lastMessage: '📷 Foto',
         lastMessageAt: new Date().toISOString(),
         lastMessageSender: 'seller',
+        sellerAvatar: sellerAvatar || sellerUser.avatarUrl || null,
         unreadByClient: true,
         unreadBySeller: false,
         updatedAt: new Date().toISOString()
@@ -1117,7 +1246,7 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
           >
             <InternalTeamChat
               companyId={companyId}
-              currentUser={sellerUser}
+              currentUser={{ ...sellerUser, avatarUrl: sellerAvatar || sellerUser.avatarUrl }}
               sellers={companySellers.filter(u => u.role === 'seller')}
               company={company}
               onClose={() => setIsInternalChatOpen(false)}

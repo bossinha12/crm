@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { doc, setDoc, collection, onSnapshot, query, orderBy, addDoc, updateDoc, getDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, sanitizeFirestoreData } from '../lib/firebase';
 import { uploadToImgBB } from '../lib/imgbb';
@@ -43,6 +43,38 @@ export default function ClientWidget({ companyId, companyName, companyLogo, onGo
   useEffect(() => {
     activeChatRef.current = activeChat;
   }, [activeChat]);
+
+  // Resolve current seller avatar with multiple resilient fallbacks (local storage cache & chat)
+  const resolvedSellerAvatar = useMemo(() => {
+    if (activeChat?.sellerAvatar) return activeChat.sellerAvatar;
+    if (activeChat?.sellerId) {
+      const stored = localStorage.getItem(`crm_seller_avatar_${companyId}_${activeChat.sellerId}`) ||
+                     localStorage.getItem(`crm_seller_avatar_global_${activeChat.sellerId}`);
+      if (stored) return stored;
+    }
+    if (activeChat?.sellerName) {
+      const stored = localStorage.getItem(`crm_seller_avatar_${activeChat.sellerName.trim().toLowerCase()}`);
+      if (stored) return stored;
+    }
+    return null;
+  }, [activeChat?.sellerAvatar, activeChat?.sellerId, activeChat?.sellerName, companyId]);
+
+  // Fallback: If chat has a seller assigned but missing avatar, fetch from Firestore user document
+  useEffect(() => {
+    if (!activeChat?.sellerId || activeChat.sellerAvatar) return;
+    let isMounted = true;
+    const fetchSellerAvatar = async () => {
+      try {
+        const uDoc = await getDoc(doc(db, 'companies', companyId, 'users', activeChat.sellerId!));
+        if (uDoc.exists() && uDoc.data()?.avatarUrl && isMounted) {
+          const fetchedAvatar = uDoc.data().avatarUrl;
+          setActiveChat(prev => prev ? { ...prev, sellerAvatar: fetchedAvatar } : null);
+        }
+      } catch (e) {}
+    };
+    fetchSellerAvatar();
+    return () => { isMounted = false; };
+  }, [activeChat?.sellerId, activeChat?.sellerAvatar, companyId]);
 
   // 1. If chatId exists, listen to Chat doc and Messages subcollection in real time
   useEffect(() => {
@@ -580,11 +612,11 @@ export default function ClientWidget({ companyId, companyName, companyLogo, onGo
           {/* Seller / Store Avatar Profile */}
           <div className="relative shrink-0">
             <div className="w-11 h-11 rounded-full bg-white/10 flex items-center justify-center border-2 border-white/30 overflow-hidden shadow-inner bg-slate-800">
-              {activeChat?.sellerAvatar ? (
+              {(resolvedSellerAvatar || activeChat?.sellerAvatar) ? (
                 <img 
-                  src={activeChat.sellerAvatar} 
+                  src={resolvedSellerAvatar || activeChat?.sellerAvatar || ''} 
                   referrerPolicy="no-referrer" 
-                  alt={activeChat.sellerName || 'Atendente'} 
+                  alt={activeChat?.sellerName || 'Atendente'} 
                   className="w-full h-full object-cover" 
                 />
               ) : companyLogo ? (
@@ -686,7 +718,7 @@ export default function ClientWidget({ companyId, companyName, companyLogo, onGo
         {messages.map((m) => {
           const isMe = m.senderType === 'client';
           const hasImage = !!m.imageUrl;
-          const sellerPhoto = m.senderAvatar || activeChat?.sellerAvatar;
+          const sellerPhoto = m.senderAvatar || resolvedSellerAvatar || activeChat?.sellerAvatar;
 
           return (
             <div
