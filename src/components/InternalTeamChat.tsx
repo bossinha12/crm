@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { collection, onSnapshot, addDoc, updateDoc, doc } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, updateDoc, doc, deleteDoc } from 'firebase/firestore';
 import { db, sanitizeFirestoreData } from '../lib/firebase';
 import { uploadToImgBB } from '../lib/imgbb';
 import { User, InternalMessage, Company } from '../types';
 import { 
   Send, MessageSquare, Megaphone, User as UserIcon, CheckCheck, 
   Camera, Loader2, ExternalLink, X, Image as ImageIcon, ShieldCheck, 
-  Sparkles, Check, Clock, WifiOff
+  Sparkles, Check, Clock, WifiOff, Trash2
 } from 'lucide-react';
 import { formatMessageDateTime } from '../lib/formatters';
 
@@ -38,8 +38,27 @@ export default function InternalTeamChat({
     return 'admin'; // Sellers talk to 'admin' or 'all'
   });
 
-  const activeCompanyId = company?.id || companyId;
-  const [messages, setMessages] = useState<InternalMessage[]>([]);
+  const activeCompanyId = company?.id || (companyId.startsWith('company_') ? companyId : `company_${companyId}`);
+  const altCompanyId = company?.slug || companyId.replace(/^company_/, '');
+
+  // Initialize messages directly from cache so they never flash blank or disappear on F5 refresh
+  const [messages, setMessages] = useState<InternalMessage[]>(() => {
+    const keys = [
+      `atendepro_internal_msgs_${activeCompanyId}`,
+      `atendepro_internal_msgs_${altCompanyId}`,
+      `atendepro_internal_msgs_${companyId}`
+    ];
+    for (const key of keys) {
+      const saved = localStorage.getItem(key);
+      if (saved) {
+        try {
+          const list = JSON.parse(saved);
+          if (Array.isArray(list) && list.length > 0) return list;
+        } catch (e) {}
+      }
+    }
+    return [];
+  });
   const [inputText, setInputText] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -56,53 +75,80 @@ export default function InternalTeamChat({
     }
   }, [targetSellerId]);
 
-  // Real-time listener for internal messages in this company
+  // Real-time listener for internal messages: listens across both canonical and slug paths
   useEffect(() => {
-    const internalCol = collection(db, 'companies', activeCompanyId, 'internal_messages');
-    const unsub = onSnapshot(internalCol, (snapshot) => {
-      const list: InternalMessage[] = [];
-      snapshot.forEach((d) => {
-        list.push({ id: d.id, ...d.data() } as InternalMessage);
-      });
+    const idsToListen = Array.from(new Set([activeCompanyId, altCompanyId, companyId])).filter(Boolean);
+    const messagesById = new Map<string, InternalMessage>();
 
-      // Sort in-memory ascending by createdAt
+    // Load initial local cache into memory map
+    const localKeys = idsToListen.map(id => `atendepro_internal_msgs_${id}`);
+    for (const k of localKeys) {
+      const saved = localStorage.getItem(k);
+      if (saved) {
+        try {
+          const parsed: InternalMessage[] = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            parsed.forEach(m => {
+              if (m.id) messagesById.set(m.id, m);
+            });
+          }
+        } catch (e) {}
+      }
+    }
+
+    const unsubs: (() => void)[] = [];
+
+    const syncCombinedMessages = () => {
+      const list = Array.from(messagesById.values());
       list.sort((a, b) => {
         const tA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
         const tB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
         return tA - tB;
       });
 
-      setMessages(prev => {
-        // Keep pending local optimistic messages (last 30s) if not yet broadcast by server
-        const now = Date.now();
-        const pendingLocal = prev.filter(m => 
-          m.id?.startsWith('local_') && 
-          (now - new Date(m.createdAt).getTime()) < 30000 &&
-          !list.some(s => s.senderId === m.senderId && s.text === m.text)
-        );
-        const merged = [...list, ...pendingLocal];
-        merged.sort((a, b) => {
-          const tA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-          const tB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-          return tA - tB;
-        });
-        return merged;
-      });
+      setMessages(list);
 
-      // Backup locally
-      localStorage.setItem(`atendepro_internal_msgs_${activeCompanyId}`, JSON.stringify(list));
-    }, (error) => {
-      console.warn("Aviso ao carregar mensagens internas do Firestore (usando fallback):", error);
-      const saved = localStorage.getItem(`atendepro_internal_msgs_${activeCompanyId}`);
-      if (saved) {
+      // Persist to all local storage keys so any refresh finds it immediately
+      for (const k of localKeys) {
         try {
-          setMessages(JSON.parse(saved));
+          localStorage.setItem(k, JSON.stringify(list));
         } catch (e) {}
       }
+    };
+
+    idsToListen.forEach((cId) => {
+      const internalCol = collection(db, 'companies', cId, 'internal_messages');
+      const unsub = onSnapshot(internalCol, (snapshot) => {
+        snapshot.docChanges().forEach(change => {
+          if (change.type === 'removed') {
+            messagesById.delete(change.doc.id);
+          } else {
+            messagesById.set(change.doc.id, { id: change.doc.id, ...change.doc.data() } as InternalMessage);
+          }
+        });
+
+        // If master explicitly cleared history, server confirms collection is empty
+        if (snapshot.empty && !snapshot.metadata.fromCache) {
+          Array.from(messagesById.keys()).forEach(key => {
+            const m = messagesById.get(key);
+            if (m?.companyId === cId || !m?.companyId) {
+              messagesById.delete(key);
+            }
+          });
+        }
+
+        syncCombinedMessages();
+      }, (error) => {
+        console.warn(`Aviso ao monitorar mensagens internas (${cId}):`, error);
+      });
+
+      unsubs.push(unsub);
     });
 
-    return () => unsub();
-  }, [activeCompanyId]);
+    return () => {
+      unsubs.forEach(u => u());
+    };
+  }, [activeCompanyId, altCompanyId, companyId]);
 
   // Auto-scroll ONLY the inner chat messages box (never moving or jerking the browser window)
   useEffect(() => {
@@ -118,25 +164,30 @@ export default function InternalTeamChat({
     }
 
     if (isAdmin) {
-      // Admin talking to specific seller
+      // Admin talking to specific seller (e.g. Souza)
+      const targetSeller = sellers.find(s => s.id === selectedRecipientId);
+      const targetSellerName = targetSeller?.name?.trim().toLowerCase();
+
       const isFromAdminToSeller = 
         (m.senderId === currentUser.id || m.senderRole === 'admin' || m.senderId.startsWith('admin')) && 
-        m.recipientId === selectedRecipientId;
+        (m.recipientId === selectedRecipientId || (targetSellerName && m.recipientName?.trim().toLowerCase() === targetSellerName));
         
       const isFromSellerToAdmin = 
-        m.senderId === selectedRecipientId && 
+        (m.senderId === selectedRecipientId || (targetSellerName && m.senderName?.trim().toLowerCase() === targetSellerName)) && 
         (m.recipientId === 'admin' || m.recipientId === currentUser.id || m.recipientId.startsWith('admin') || m.recipientRole === 'admin');
 
       return isFromAdminToSeller || isFromSellerToAdmin;
     } else {
-      // Seller talking to admin or seeing 'all'
+      // Seller talking to admin:
+      // Show messages sent by this seller to admin
       const isMyMessage = 
-        m.senderId === currentUser.id && 
-        (m.recipientId === 'admin' || m.recipientId === 'all' || m.recipientId.startsWith('admin'));
+        (m.senderId === currentUser.id || (currentUser.name && m.senderName?.trim().toLowerCase() === currentUser.name.trim().toLowerCase())) && 
+        (m.recipientId === 'admin' || m.recipientId.startsWith('admin') || m.recipientRole === 'admin');
         
+      // Show messages sent by admin to this seller
       const isFromAdminToMe = 
         (m.senderRole === 'admin' || m.senderId.startsWith('admin')) && 
-        (m.recipientId === currentUser.id || m.recipientId === 'all');
+        (m.recipientId === currentUser.id || m.recipientId === 'admin' || (currentUser.name && m.recipientName?.trim().toLowerCase() === currentUser.name.trim().toLowerCase()));
 
       return isMyMessage || isFromAdminToMe;
     }
@@ -146,7 +197,11 @@ export default function InternalTeamChat({
   const getUnreadCount = (recipientId: string) => {
     return messages.filter((m) => {
       if (m.senderId === currentUser.id) return false;
-      const isRead = m.readBy && m.readBy.includes(currentUser.id);
+      const isRead = m.readBy && (
+        m.readBy.includes(currentUser.id) ||
+        (currentUser.name && m.readBy.includes(currentUser.name)) ||
+        (currentUser.name && m.readBy.some((r: string) => r?.toLowerCase() === currentUser.name?.trim().toLowerCase()))
+      );
       if (isRead) return false;
 
       if (recipientId === 'all') {
@@ -156,26 +211,86 @@ export default function InternalTeamChat({
     }).length;
   };
 
-  // Mark messages as read safely without re-render loop
+  // Calculate unread counters for seller channels ('admin' or 'all')
+  const getSellerUnreadCount = (channel: 'admin' | 'all') => {
+    return messages.filter((m) => {
+      if (m.senderId === currentUser.id) return false;
+      const isRead = m.readBy && (
+        m.readBy.includes(currentUser.id) ||
+        (currentUser.name && m.readBy.includes(currentUser.name)) ||
+        (currentUser.name && m.readBy.some((r: string) => r?.toLowerCase() === currentUser.name?.trim().toLowerCase()))
+      );
+      if (isRead) return false;
+
+      if (channel === 'all') {
+        return m.recipientId === 'all';
+      } else {
+        return m.recipientId === currentUser.id || 
+               m.recipientId === 'admin' || 
+               (currentUser.name && m.recipientName?.trim().toLowerCase() === currentUser.name?.trim().toLowerCase());
+      }
+    }).length;
+  };
+
+  // Mark messages as read safely across local state and all Firestore company ID aliases
   useEffect(() => {
+    const isMsgReadByMe = (m: InternalMessage) => {
+      if (!m.readBy) return false;
+      return (
+        m.readBy.includes(currentUser.id) ||
+        (currentUser.name && m.readBy.includes(currentUser.name)) ||
+        (currentUser.name && m.readBy.some((r: string) => r?.toLowerCase() === currentUser.name?.trim().toLowerCase()))
+      );
+    };
+
     const unreadMsgs = currentConversationMessages.filter(
-      (m) => m.id && !markedAsReadIdsRef.current.has(m.id) && m.senderId !== currentUser.id && (!m.readBy || !m.readBy.includes(currentUser.id))
+      (m) => m.id && !markedAsReadIdsRef.current.has(m.id) && m.senderId !== currentUser.id && !isMsgReadByMe(m)
     );
 
     if (unreadMsgs.length > 0) {
       unreadMsgs.forEach(async (msg) => {
         if (!msg.id) return;
         markedAsReadIdsRef.current.add(msg.id);
-        try {
-          const docRef = doc(db, 'companies', activeCompanyId, 'internal_messages', msg.id);
-          const updatedReadBy = [...(msg.readBy || []), currentUser.id];
-          await updateDoc(docRef, sanitizeFirestoreData({ readBy: updatedReadBy }));
-        } catch (e) {
-          // ignore transient errors
+
+        const identifiers = Array.from(new Set([
+          currentUser.id,
+          currentUser.name,
+          currentUser.name?.toLowerCase(),
+          isAdmin ? 'admin' : undefined
+        ].filter(Boolean))) as string[];
+
+        const updatedReadBy = Array.from(new Set([
+          ...(msg.readBy || []),
+          ...identifiers
+        ]));
+
+        // Optimistically update local message state and backup
+        setMessages(prev => {
+          const updated = prev.map(m => m.id === msg.id ? { ...m, readBy: updatedReadBy } : m);
+          try {
+            localStorage.setItem(`atendepro_internal_msgs_${activeCompanyId}`, JSON.stringify(updated));
+            if (altCompanyId) localStorage.setItem(`atendepro_internal_msgs_${altCompanyId}`, JSON.stringify(updated));
+          } catch (e) {}
+          return updated;
+        });
+
+        // Persist to all company ID targets in Firestore
+        const targetCompIds = Array.from(new Set([
+          msg.companyId,
+          activeCompanyId,
+          altCompanyId,
+          companyId
+        ])).filter(Boolean) as string[];
+
+        for (const cId of targetCompIds) {
+          try {
+            const docRef = doc(db, 'companies', cId, 'internal_messages', msg.id);
+            await updateDoc(docRef, sanitizeFirestoreData({ readBy: updatedReadBy }));
+          } catch (e) {}
         }
       });
     }
-  }, [currentConversationMessages, currentUser.id, activeCompanyId]);
+  }, [currentConversationMessages, currentUser.id, currentUser.name, activeCompanyId, altCompanyId, companyId, isAdmin]);
 
   const handleSendMessage = async (e?: React.FormEvent, directText?: string) => {
     if (e) e.preventDefault();
@@ -215,38 +330,35 @@ export default function InternalTeamChat({
     setSendError(null);
 
     // 2. Deliver to Firestore in background with automatic resilience
+    const dataToSave = sanitizeFirestoreData({
+      companyId: newMsg.companyId,
+      senderId: newMsg.senderId,
+      senderName: newMsg.senderName,
+      senderAvatar: newMsg.senderAvatar,
+      senderRole: newMsg.senderRole,
+      recipientId: newMsg.recipientId,
+      recipientName: newMsg.recipientName,
+      text: newMsg.text,
+      readBy: newMsg.readBy,
+      createdAt: newMsg.createdAt
+    });
+
     try {
       const internalCol = collection(db, 'companies', activeCompanyId, 'internal_messages');
-      await addDoc(internalCol, sanitizeFirestoreData({
-        companyId: newMsg.companyId,
-        senderId: newMsg.senderId,
-        senderName: newMsg.senderName,
-        senderAvatar: newMsg.senderAvatar,
-        senderRole: newMsg.senderRole,
-        recipientId: newMsg.recipientId,
-        recipientName: newMsg.recipientName,
-        text: newMsg.text,
-        readBy: newMsg.readBy,
-        createdAt: newMsg.createdAt
-      }));
+      await addDoc(internalCol, dataToSave);
+      if (altCompanyId && altCompanyId !== activeCompanyId) {
+        addDoc(collection(db, 'companies', altCompanyId, 'internal_messages'), dataToSave).catch(() => {});
+      }
     } catch (err) {
       console.warn("Aviso ao enviar mensagem interna no Firestore (tentando reconectar):", err);
       // Automatic quick retry after 600ms
       try {
         await new Promise(r => setTimeout(r, 600));
         const internalCol = collection(db, 'companies', activeCompanyId, 'internal_messages');
-        await addDoc(internalCol, sanitizeFirestoreData({
-          companyId: newMsg.companyId,
-          senderId: newMsg.senderId,
-          senderName: newMsg.senderName,
-          senderAvatar: newMsg.senderAvatar,
-          senderRole: newMsg.senderRole,
-          recipientId: newMsg.recipientId,
-          recipientName: newMsg.recipientName,
-          text: newMsg.text,
-          readBy: newMsg.readBy,
-          createdAt: newMsg.createdAt
-        }));
+        await addDoc(internalCol, dataToSave);
+        if (altCompanyId && altCompanyId !== activeCompanyId) {
+          addDoc(collection(db, 'companies', altCompanyId, 'internal_messages'), dataToSave).catch(() => {});
+        }
       } catch (retryErr) {
         console.warn("Segunda tentativa de envio no Firestore falhou (mantendo local):", retryErr);
         setSendError('Mensagem salva localmente no navegador. Sincronizando com a nuvem...');
@@ -308,8 +420,7 @@ export default function InternalTeamChat({
         return updated;
       });
 
-      const internalCol = collection(db, 'companies', activeCompanyId, 'internal_messages');
-      await addDoc(internalCol, sanitizeFirestoreData({
+      const imgDataToSave = sanitizeFirestoreData({
         companyId: newMsg.companyId,
         senderId: newMsg.senderId,
         senderName: newMsg.senderName,
@@ -321,7 +432,13 @@ export default function InternalTeamChat({
         imageUrl: newMsg.imageUrl,
         readBy: newMsg.readBy,
         createdAt: newMsg.createdAt
-      }));
+      });
+
+      const internalCol = collection(db, 'companies', activeCompanyId, 'internal_messages');
+      await addDoc(internalCol, imgDataToSave);
+      if (altCompanyId && altCompanyId !== activeCompanyId) {
+        addDoc(collection(db, 'companies', altCompanyId, 'internal_messages'), imgDataToSave).catch(() => {});
+      }
     } catch (err) {
       console.error("Erro no envio de imagem no chat interno:", err);
       setUploadError(err instanceof Error ? err.message : 'Erro ao enviar imagem ao ImgBB.');
@@ -343,6 +460,35 @@ export default function InternalTeamChat({
   ];
 
   const selectedSeller = sellers.find(s => s.id === selectedRecipientId);
+
+  const handleClearCurrentConversation = async () => {
+    if (!isAdmin) return;
+    const isMural = selectedRecipientId === 'all';
+    const confirmClean = confirm(
+      isMural
+        ? 'Deseja realmente limpar todos os avisos do Mural Geral da Equipe do banco de dados?'
+        : `Deseja realmente apagar o histórico de mensagens desta conversa com ${selectedSeller?.name || 'este vendedor'} do banco de dados?`
+    );
+    if (!confirmClean) return;
+
+    try {
+      const msgsToDelete = currentConversationMessages;
+      const targetCompanyIds = Array.from(new Set([activeCompanyId, altCompanyId, companyId])).filter(Boolean);
+
+      for (const m of msgsToDelete) {
+        if (!m.id) continue;
+        for (const cId of targetCompanyIds) {
+          try {
+            await deleteDoc(doc(db, 'companies', cId, 'internal_messages', m.id));
+          } catch (e) {}
+        }
+      }
+
+      setMessages(prev => prev.filter(m => !msgsToDelete.some(d => d.id === m.id)));
+    } catch (err) {
+      console.warn('Erro ao limpar conversa:', err);
+    }
+  };
 
   return (
     <div className="w-full bg-white rounded-2xl border border-slate-200/80 shadow-xl overflow-hidden flex flex-col h-[640px]">
@@ -506,6 +652,11 @@ export default function InternalTeamChat({
                   </p>
                 </div>
               </div>
+              {getSellerUnreadCount('admin') > 0 && (
+                <span className="bg-rose-500 text-white text-[10px] font-extrabold px-2 py-0.5 rounded-full shrink-0 animate-pulse">
+                  {getSellerUnreadCount('admin')}
+                </span>
+              )}
             </button>
 
             <button
@@ -530,6 +681,11 @@ export default function InternalTeamChat({
                   </p>
                 </div>
               </div>
+              {getSellerUnreadCount('all') > 0 && (
+                <span className="bg-rose-500 text-white text-[10px] font-extrabold px-2 py-0.5 rounded-full shrink-0 animate-pulse">
+                  {getSellerUnreadCount('all')}
+                </span>
+              )}
             </button>
           </div>
         )}
@@ -554,6 +710,18 @@ export default function InternalTeamChat({
                 </p>
               </div>
             </div>
+
+            {isAdmin && currentConversationMessages.length > 0 && (
+              <button
+                type="button"
+                onClick={handleClearCurrentConversation}
+                className="text-xs text-slate-400 hover:text-rose-600 hover:bg-rose-50 px-2.5 py-1.5 rounded-lg border border-transparent hover:border-rose-100 flex items-center gap-1 transition-all cursor-pointer"
+                title="Limpar mensagens desta conversa do banco de dados"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline font-medium">Limpar Conversa</span>
+              </button>
+            )}
           </div>
 
           {/* Upload Error Banner */}

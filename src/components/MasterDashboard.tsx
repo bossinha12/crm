@@ -330,23 +330,57 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
 
   // Load unread internal team messages for the Admin
   useEffect(() => {
-    const internalCol = collection(db, 'companies', companyId, 'internal_messages');
-    const unsubInternal = onSnapshot(internalCol, (snapshot) => {
+    const activeCompId = company?.id || (companyId.startsWith('company_') ? companyId : `company_${companyId}`);
+    const altCompId = company?.slug || companyId.replace(/^company_/, '');
+    const idsToMonitor = Array.from(new Set([activeCompId, altCompId, companyId])).filter(Boolean);
+
+    const unsubs: (() => void)[] = [];
+    const internalMsgsMap = new Map<string, any>();
+
+    const updateAdminUnread = () => {
       let unread = 0;
-      snapshot.forEach((d) => {
-        const data = d.data();
+      internalMsgsMap.forEach((data) => {
+        const isRead = data.readBy && (
+          data.readBy.includes(adminUser.id) ||
+          data.readBy.includes('admin') ||
+          (adminUser.name && data.readBy.includes(adminUser.name)) ||
+          (adminUser.name && data.readBy.some((r: string) => r?.toLowerCase() === adminUser.name?.trim().toLowerCase()))
+        );
         // Count unread if message was sent by a seller and not read by admin yet
-        if (data.senderRole === 'seller' && (!data.readBy || !data.readBy.includes(adminUser.id))) {
+        if (data.senderRole === 'seller' && !isRead) {
           unread++;
         }
       });
       setUnreadInternalCount(unread);
-    }, (error) => {
-      console.warn("Aviso ao carregar mensagens internas:", error);
+    };
+
+    idsToMonitor.forEach((cId) => {
+      const internalCol = collection(db, 'companies', cId, 'internal_messages');
+      const unsub = onSnapshot(internalCol, (snapshot) => {
+        snapshot.docChanges().forEach(change => {
+          if (change.type === 'removed') {
+            internalMsgsMap.delete(change.doc.id);
+          } else {
+            internalMsgsMap.set(change.doc.id, change.doc.data());
+          }
+        });
+        if (snapshot.empty && !snapshot.metadata.fromCache) {
+          Array.from(internalMsgsMap.keys()).forEach(k => {
+            const item = internalMsgsMap.get(k);
+            if (item?.companyId === cId || !item?.companyId) internalMsgsMap.delete(k);
+          });
+        }
+        updateAdminUnread();
+      }, (error) => {
+        console.warn(`Aviso ao carregar mensagens internas do admin (${cId}):`, error);
+      });
+      unsubs.push(unsub);
     });
 
-    return () => unsubInternal();
-  }, [companyId, adminUser.id]);
+    return () => {
+      unsubs.forEach(u => u());
+    };
+  }, [companyId, company?.id, company?.slug, adminUser.id, adminUser.name]);
 
   // Promotional campaign message builder
   const updatePromoMessage = (type: 'discount' | 'new_arrivals' | 'flash_sale' | 'custom', lead: Lead) => {
@@ -687,15 +721,7 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
       setMirroredChatId(null);
       setMirroredMessages([]);
 
-      if (idList.length === 0) {
-        // Wipe potential customer active session stored on browsers
-        localStorage.removeItem('atendepro_client_chat_id');
-        alert('Não há conversas ou históricos registrados para apagar.');
-        setIsClearing(false);
-        return;
-      }
-
-      // 3. Prepare and execute all deletion processes
+      // 3. Prepare and execute all deletion processes for chats
       const deletePromises = idList.map(async (chatID) => {
         // Delete the chat document itself FIRST to clear real-time list immediately
         try {
@@ -719,10 +745,26 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
 
       await Promise.all(deletePromises);
 
-      // 4. Wipe potential customer active session stored on browsers
+      // 4. Wipe internal team communication messages in Firestore
+      try {
+        const canonicalId = company?.id || (companyId.startsWith('company_') ? companyId : `company_${companyId}`);
+        const altId = company?.slug || companyId.replace(/^company_/, '');
+        const targetIds = Array.from(new Set([companyId, canonicalId, altId])).filter(Boolean);
+
+        for (const cId of targetIds) {
+          const internalCol = collection(db, 'companies', cId, 'internal_messages');
+          const intSnap = await getDocs(internalCol);
+          await Promise.all(intSnap.docs.map(d => deleteDoc(d.ref)));
+          localStorage.removeItem(`atendepro_internal_msgs_${cId}`);
+        }
+      } catch (internalErr) {
+        console.warn("Aviso ao limpar mensagens internas:", internalErr);
+      }
+
+      // 5. Wipe potential customer active session stored on browsers
       localStorage.removeItem('atendepro_client_chat_id');
 
-      alert('Todos os dados de atendimentos e históricos de conversas foram excluídos com sucesso!');
+      alert('Todos os dados de atendimentos e históricos de conversas foram excluídos com sucesso do banco de dados!');
     } catch (err) {
       console.error('Erro ao excluir dados:', err);
       alert('Dados limpos com sucesso!');

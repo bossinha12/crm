@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { collection, onSnapshot, query, orderBy, doc, updateDoc, addDoc, getDoc, setDoc, getDocs } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, sanitizeFirestoreData } from '../lib/firebase';
 import { uploadToImgBB } from '../lib/imgbb';
-import { Chat, User, Message, ChatStatus, Company } from '../types';
+import { Chat, User, Message, ChatStatus, Company, InternalMessage } from '../types';
 import { crmAlarm } from '../lib/audio';
 import { 
   MessageSquare, User as UserIcon, Send, LogOut, Phone, ShieldClose, 
@@ -58,6 +58,7 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
 
   // Internal Direct Team Chat with Owner / Management
   const [isInternalChatOpen, setIsInternalChatOpen] = useState(false);
+  const [internalChatTargetChannel, setInternalChatTargetChannel] = useState<'admin' | 'all'>('admin');
   const [unreadInternalMsgs, setUnreadInternalMsgs] = useState(0);
   const [lastAdminNotice, setLastAdminNotice] = useState<string | null>(null);
   const [companySellers, setCompanySellers] = useState<User[]>([]);
@@ -280,34 +281,134 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
     });
   }, [chats, sellerAvatar, companyId, sellerUser.id, sellerUser.name]);
 
+  // Ref to hold current notices for instantaneous mark-as-read
+  const noticesByMsgIdRef = useRef<Map<string, InternalMessage>>(new Map());
+
+  // Function to mark notices as read both optimistically in UI and in Firestore
+  const handleMarkNoticeAsRead = async (channel?: 'admin' | 'all') => {
+    // 1. Instantly clear unread count in local state so alert banner vanishes with zero latency
+    setUnreadInternalMsgs(0);
+
+    const activeCompId = company?.id || (companyId.startsWith('company_') ? companyId : `company_${companyId}`);
+    const altCompId = company?.slug || companyId.replace(/^company_/, '');
+    const idsToTarget = Array.from(new Set([activeCompId, altCompId, companyId])).filter(Boolean);
+
+    const identifiers = Array.from(new Set([
+      sellerUser.id,
+      sellerUser.name,
+      sellerUser.name?.toLowerCase()
+    ].filter(Boolean))) as string[];
+
+    const unreadEntries: { id: string; data: InternalMessage }[] = [];
+    noticesByMsgIdRef.current.forEach((data, msgId) => {
+      const isForMe = data.recipientId === sellerUser.id || 
+                      data.recipientId === 'all' || 
+                      (sellerUser.name && data.recipientName?.trim().toLowerCase() === sellerUser.name.trim().toLowerCase());
+      const fromAdmin = data.senderRole === 'admin' || data.senderId?.startsWith('admin');
+      const isAlreadyRead = data.readBy && (
+        data.readBy.includes(sellerUser.id) ||
+        data.readBy.includes(sellerUser.name) ||
+        (sellerUser.name && data.readBy.some((r: string) => r?.toLowerCase() === sellerUser.name?.trim().toLowerCase()))
+      );
+
+      if (isForMe && fromAdmin && !isAlreadyRead) {
+        if (!channel || channel === (data.recipientId === 'all' ? 'all' : 'admin')) {
+          unreadEntries.push({ id: msgId, data });
+        }
+      }
+    });
+
+    for (const item of unreadEntries) {
+      const updatedReadBy = Array.from(new Set([...(item.data.readBy || []), ...identifiers]));
+      // Update in memory map
+      noticesByMsgIdRef.current.set(item.id, { ...item.data, readBy: updatedReadBy });
+
+      // Update in Firestore across all company aliases
+      for (const cId of idsToTarget) {
+        try {
+          await updateDoc(doc(db, 'companies', cId, 'internal_messages', item.id), sanitizeFirestoreData({ readBy: updatedReadBy }));
+        } catch (e) {}
+      }
+    }
+  };
+
   // Real-time listener for internal messages from Admin / Management to this Seller or to 'all'
   useEffect(() => {
-    const internalCol = collection(db, 'companies', companyId, 'internal_messages');
-    const unsubInternal = onSnapshot(internalCol, (snapshot) => {
+    const activeCompId = company?.id || (companyId.startsWith('company_') ? companyId : `company_${companyId}`);
+    const altCompId = company?.slug || companyId.replace(/^company_/, '');
+    const idsToMonitor = Array.from(new Set([activeCompId, altCompId, companyId])).filter(Boolean);
+
+    const unsubs: (() => void)[] = [];
+
+    const updateNoticeState = () => {
       let unread = 0;
       let latestNotice: string | null = null;
+      let targetChannel: 'admin' | 'all' = 'admin';
 
-      snapshot.forEach((d) => {
-        const data = d.data();
-        const isForMe = data.recipientId === sellerUser.id || data.recipientId === 'all';
-        const fromAdmin = data.senderRole === 'admin' || data.senderId.startsWith('admin');
+      const allNotices: InternalMessage[] = Array.from(noticesByMsgIdRef.current.values());
+      allNotices.sort((a, b) => {
+        const tA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const tB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return tA - tB;
+      });
+
+      allNotices.forEach((data) => {
+        const isForMe = data.recipientId === sellerUser.id || 
+                        data.recipientId === 'all' || 
+                        (sellerUser.name && data.recipientName?.trim().toLowerCase() === sellerUser.name.trim().toLowerCase());
+        const fromAdmin = data.senderRole === 'admin' || data.senderId?.startsWith('admin');
+
+        const isAlreadyRead = data.readBy && (
+          data.readBy.includes(sellerUser.id) ||
+          data.readBy.includes(sellerUser.name) ||
+          (sellerUser.name && data.readBy.some((r: string) => r?.toLowerCase() === sellerUser.name?.trim().toLowerCase()))
+        );
 
         if (isForMe && fromAdmin) {
-          latestNotice = data.text;
-          if (!data.readBy || !data.readBy.includes(sellerUser.id)) {
+          if (!isAlreadyRead) {
             unread++;
+            latestNotice = data.text;
+            if (data.recipientId === 'all') {
+              targetChannel = 'all';
+            } else {
+              targetChannel = 'admin';
+            }
           }
         }
       });
 
       setUnreadInternalMsgs(unread);
       setLastAdminNotice(latestNotice);
-    }, (error) => {
-      console.warn("Aviso ao monitorar mensagens internas do vendedor:", error);
+      setInternalChatTargetChannel(targetChannel);
+    };
+
+    idsToMonitor.forEach((cId) => {
+      const internalCol = collection(db, 'companies', cId, 'internal_messages');
+      const unsub = onSnapshot(internalCol, (snapshot) => {
+        snapshot.docChanges().forEach(change => {
+          if (change.type === 'removed') {
+            noticesByMsgIdRef.current.delete(change.doc.id);
+          } else {
+            noticesByMsgIdRef.current.set(change.doc.id, { id: change.doc.id, ...change.doc.data() } as InternalMessage);
+          }
+        });
+        if (snapshot.empty && !snapshot.metadata.fromCache) {
+          Array.from(noticesByMsgIdRef.current.keys()).forEach(k => {
+            const item = noticesByMsgIdRef.current.get(k);
+            if (item?.companyId === cId || !item?.companyId) noticesByMsgIdRef.current.delete(k);
+          });
+        }
+        updateNoticeState();
+      }, (error) => {
+        console.warn(`Aviso ao monitorar mensagens internas do vendedor (${cId}):`, error);
+      });
+      unsubs.push(unsub);
     });
 
-    return () => unsubInternal();
-  }, [companyId, sellerUser.id]);
+    return () => {
+      unsubs.forEach(u => u());
+    };
+  }, [companyId, company?.id, company?.slug, sellerUser.id, sellerUser.name]);
 
   // Hook to automatically unselect the active chat if it gets deleted from resources
   useEffect(() => {
@@ -768,7 +869,11 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
           {/* Internal Chat with Owner / Management Button */}
           <button
             type="button"
-            onClick={() => setIsInternalChatOpen(true)}
+            onClick={() => {
+              handleMarkNoticeAsRead('admin');
+              setInternalChatTargetChannel('admin');
+              setIsInternalChatOpen(true);
+            }}
             className={`text-xs font-bold px-3.5 py-1.5 rounded-xl flex items-center gap-2 transition-all cursor-pointer shadow-sm ${
               unreadInternalMsgs > 0
                 ? 'bg-indigo-600 hover:bg-indigo-500 text-white animate-pulse shadow-indigo-500/30'
@@ -876,30 +981,54 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
       {/* Internal Management Notice Banner (if there are unread messages) */}
       {unreadInternalMsgs > 0 && (
         <div 
-          onClick={() => setIsInternalChatOpen(true)}
+          onClick={() => {
+            handleMarkNoticeAsRead(internalChatTargetChannel);
+            setIsInternalChatOpen(true);
+          }}
           className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl p-4 flex items-center justify-between gap-4 cursor-pointer shadow-lg shadow-indigo-500/20 transition-all border border-indigo-500"
         >
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 min-w-0">
             <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
               <Megaphone className="w-5 h-5 text-white animate-bounce" />
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <span className="text-[10px] uppercase font-extrabold px-2 py-0.5 rounded bg-white/20 text-white">
+                <span className="text-[10px] uppercase font-extrabold px-2 py-0.5 rounded bg-white/20 text-white shrink-0">
                   Aviso da Diretoria / Gerência
                 </span>
-                <span className="text-xs font-bold text-indigo-100">
+                <span className="text-xs font-bold text-indigo-100 shrink-0">
                   {unreadInternalMsgs} nova{unreadInternalMsgs > 1 ? 's' : ''} mensagem{unreadInternalMsgs > 1 ? 'ens' : ''}
                 </span>
               </div>
-              <p className="text-xs font-medium text-white mt-0.5 line-clamp-1">
+              <p className="text-xs font-medium text-white mt-0.5 line-clamp-1 break-words">
                 {lastAdminNotice || 'Você possui nova mensagem da diretoria. Clique para responder.'}
               </p>
             </div>
           </div>
-          <button className="px-3.5 py-1.5 bg-white text-indigo-700 hover:bg-indigo-50 text-xs font-bold rounded-xl shrink-0 transition-colors shadow-sm">
-            Responder Agora 💬
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button 
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleMarkNoticeAsRead(internalChatTargetChannel);
+                setIsInternalChatOpen(true);
+              }}
+              className="px-3.5 py-1.5 bg-white text-indigo-700 hover:bg-indigo-50 text-xs font-bold rounded-xl shrink-0 transition-colors shadow-sm cursor-pointer"
+            >
+              Responder Agora 💬
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleMarkNoticeAsRead();
+              }}
+              className="p-1.5 text-white/80 hover:text-white hover:bg-white/20 rounded-xl transition-colors cursor-pointer shrink-0"
+              title="Dispensar aviso e marcar como lido"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       )}
 
@@ -1279,6 +1408,7 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
               currentUser={{ ...sellerUser, avatarUrl: sellerAvatar || sellerUser.avatarUrl }}
               sellers={companySellers.filter(u => u.role === 'seller')}
               company={company}
+              targetSellerId={internalChatTargetChannel}
               onClose={() => setIsInternalChatOpen(false)}
             />
           </div>

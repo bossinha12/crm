@@ -28,10 +28,28 @@ export default function App() {
   };
 
   const [companyId, setCompanyId] = useState<string>(() => {
+    const targetParam = getCompanyIdentifierFromUrl().toLowerCase();
+    const cachedCompStr = localStorage.getItem(`crm_cached_company_${targetParam}`);
+    if (cachedCompStr) {
+      try {
+        const parsed = JSON.parse(cachedCompStr) as Company;
+        if (parsed?.id) return parsed.id;
+      } catch (e) {}
+    }
     return getCompanyIdentifierFromUrl();
   });
 
-  const [company, setCompany] = useState<Company | null>(null);
+  const [company, setCompany] = useState<Company | null>(() => {
+    const targetParam = getCompanyIdentifierFromUrl().toLowerCase();
+    const cachedCompStr = localStorage.getItem(`crm_cached_company_${targetParam}`) ||
+                          localStorage.getItem(`crm_cached_company_company_${targetParam}`);
+    if (cachedCompStr) {
+      try {
+        return JSON.parse(cachedCompStr) as Company;
+      } catch (e) {}
+    }
+    return null;
+  });
   const [allCompaniesList, setAllCompaniesList] = useState<Company[]>([]);
   const [isSuperAdminView, setIsSuperAdminView] = useState<boolean>(() => {
     const params = new URLSearchParams(window.location.search);
@@ -43,9 +61,12 @@ export default function App() {
   });
 
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    const activeId = getCompanyIdentifierFromUrl();
+    const activeId = getCompanyIdentifierFromUrl().toLowerCase();
     const saved = localStorage.getItem(`crm_current_user_${activeId}`) || 
-                  localStorage.getItem('crm_current_user_atendepro');
+                  localStorage.getItem(`crm_current_user_company_${activeId}`) ||
+                  localStorage.getItem(`crm_current_user_${companyId}`) ||
+                  localStorage.getItem('crm_current_user_atendepro') ||
+                  localStorage.getItem('crm_current_user');
     if (saved) {
       try {
         const parsed: User = JSON.parse(saved);
@@ -65,17 +86,25 @@ export default function App() {
     return null;
   });
 
-  // Watch for session changes to persist/remove from localStorage
+  // Watch for session changes to persist/remove from localStorage across aliases
   useEffect(() => {
+    const rawTarget = getCompanyIdentifierFromUrl().toLowerCase();
     if (currentUser) {
       localStorage.setItem(`crm_current_user_${companyId}`, JSON.stringify(currentUser));
+      localStorage.setItem(`crm_current_user_${rawTarget}`, JSON.stringify(currentUser));
+      localStorage.setItem(`crm_current_user_company_${rawTarget}`, JSON.stringify(currentUser));
+      localStorage.setItem('crm_current_user', JSON.stringify(currentUser));
       if (currentUser.avatarUrl) {
         localStorage.setItem(`crm_seller_avatar_${companyId}_${currentUser.id}`, currentUser.avatarUrl);
+        localStorage.setItem(`crm_seller_avatar_${rawTarget}_${currentUser.id}`, currentUser.avatarUrl);
         localStorage.setItem(`crm_seller_avatar_${currentUser.name.trim().toLowerCase()}`, currentUser.avatarUrl);
         localStorage.setItem(`crm_seller_avatar_global_${currentUser.id}`, currentUser.avatarUrl);
       }
     } else {
       localStorage.removeItem(`crm_current_user_${companyId}`);
+      localStorage.removeItem(`crm_current_user_${rawTarget}`);
+      localStorage.removeItem(`crm_current_user_company_${rawTarget}`);
+      localStorage.removeItem('crm_current_user');
     }
   }, [currentUser, companyId]);
 
@@ -269,6 +298,11 @@ export default function App() {
             }
             setCompany(matched);
             setCompanyId(matched.id);
+            try {
+              localStorage.setItem(`crm_cached_company_${targetParam}`, JSON.stringify(matched));
+              localStorage.setItem(`crm_cached_company_${matched.id}`, JSON.stringify(matched));
+              if (matched.slug) localStorage.setItem(`crm_cached_company_${matched.slug.toLowerCase()}`, JSON.stringify(matched));
+            } catch (e) {}
           } else {
             // If target is default
             if (targetParam === 'atendepro_default' || targetParam === 'larissamoveis') {
