@@ -8,8 +8,9 @@ import {
   MessageSquare, User as UserIcon, Send, LogOut, Phone, ShieldClose, 
   Volume2, VolumeX, Sparkles, Copy, Check, CheckSquare,
   Image as ImageIcon, Camera, Loader2, ExternalLink, X, ShieldCheck, Megaphone,
-  Upload, CheckCircle, BellRing, PhoneCall
+  Upload, CheckCircle, BellRing, PhoneCall, Clock
 } from 'lucide-react';
+import { formatMessageDateTime } from '../lib/formatters';
 import InternalTeamChat from './InternalTeamChat';
 
 interface SellerDashboardProps {
@@ -928,6 +929,12 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
                     <div className="min-w-0">
                       <p className="text-sm font-semibold text-slate-800 truncate">{c.clientName}</p>
                       <p className="text-[10px] text-slate-400 truncate mt-0.5">{c.lastMessage}</p>
+                      {(c.lastMessageAt || c.createdAt) && (
+                        <p className="text-[9px] text-indigo-500 font-mono mt-0.5 flex items-center gap-1">
+                          <Clock className="w-2.5 h-2.5 shrink-0 opacity-70" />
+                          <span>{formatMessageDateTime(c.lastMessageAt || c.createdAt)}</span>
+                        </p>
+                      )}
                     </div>
                     <button
                       onClick={() => handleClaimChat(c)}
@@ -981,6 +988,12 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
                         <p className={`text-xs truncate mt-0.5 ${hasUnreadClientMsg ? 'text-rose-700 font-semibold' : 'text-slate-500'}`}>
                           {c.lastMessage || 'Nenhuma conversa ainda...'}
                         </p>
+                        {(c.lastMessageAt || c.createdAt) && (
+                          <p className="text-[9px] text-slate-400 font-mono mt-0.5 flex items-center gap-1">
+                            <Clock className="w-2.5 h-2.5 shrink-0 opacity-70" />
+                            <span>{formatMessageDateTime(c.lastMessageAt || c.createdAt)}</span>
+                          </p>
+                        )}
                       </div>
 
                       {/* Red notification badge for unread client messages */}
@@ -1039,8 +1052,13 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
                   
                   if (isSystem) {
                     return (
-                      <div key={m.id} className="text-center py-1 text-slate-400 font-mono text-[10px]">
-                        {m.text}
+                      <div key={m.id} className="text-center py-1 text-slate-400 font-mono text-[10px] flex items-center justify-center gap-1.5">
+                        <span>{m.text}</span>
+                        {m.createdAt && (
+                          <span className="text-slate-500 font-normal">
+                            ({formatMessageDateTime(m.createdAt)})
+                          </span>
+                        )}
                       </div>
                     );
                   }
@@ -1085,6 +1103,18 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
                           </div>
                         )}
                         {!hasImage && m.text}
+
+                        {/* Date and Time */}
+                        {m.createdAt && (
+                          <div
+                            className={`text-[10px] mt-1.5 flex items-center gap-1 font-mono select-none ${
+                              isSeller ? 'text-slate-400 justify-end' : 'text-slate-500 justify-end'
+                            }`}
+                          >
+                            <Clock className="w-3 h-3 opacity-75 shrink-0" />
+                            <span>{formatMessageDateTime(m.createdAt)}</span>
+                          </div>
+                        )}
                       </div>
                     </div>
                   );

@@ -6,8 +6,9 @@ import { User, InternalMessage, Company } from '../types';
 import { 
   Send, MessageSquare, Megaphone, User as UserIcon, CheckCheck, 
   Camera, Loader2, ExternalLink, X, Image as ImageIcon, ShieldCheck, 
-  Sparkles, Check
+  Sparkles, Check, Clock
 } from 'lucide-react';
+import { formatMessageDateTime } from '../lib/formatters';
 
 interface InternalTeamChatProps {
   companyId: string;
@@ -537,11 +538,14 @@ export default function InternalTeamChat({
 
                       {!hasImage && <p className="whitespace-pre-wrap">{m.text}</p>}
 
-                      <div className={`text-[9px] text-right mt-1 font-mono ${
-                        isMe ? 'text-indigo-200' : isSenderAdmin ? 'text-slate-400' : 'text-slate-400'
-                      }`}>
-                        {m.createdAt ? new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
-                      </div>
+                      {m.createdAt && (
+                        <div className={`text-[10px] text-right mt-1.5 flex items-center justify-end gap-1 font-mono ${
+                          isMe ? 'text-indigo-200' : isSenderAdmin ? 'text-slate-400' : 'text-slate-500'
+                        }`}>
+                          <Clock className="w-3 h-3 opacity-75 shrink-0" />
+                          <span>{formatMessageDateTime(m.createdAt)}</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 );

@@ -5,8 +5,10 @@ import { uploadToImgBB } from '../lib/imgbb';
 import { Chat, Message, ChatStatus, Lead } from '../types';
 import { 
   Send, MessageSquare, Phone, User, CheckCheck, Landmark, RefreshCw, 
-  XCircle, Image as ImageIcon, Camera, Loader2, ExternalLink, X, ShieldCheck 
+  XCircle, Image as ImageIcon, Camera, Loader2, ExternalLink, X, ShieldCheck,
+  Clock
 } from 'lucide-react';
+import { formatMessageDateTime } from '../lib/formatters';
 
 interface ClientWidgetProps {
   companyId: string;
@@ -783,6 +785,18 @@ export default function ClientWidget({ companyId, companyName, companyLogo, onGo
                     </div>
                   )}
                   {!hasImage && m.text}
+
+                  {/* Message timestamp: date and time */}
+                  {m.createdAt && (
+                    <div
+                      className={`text-[10px] mt-1.5 flex items-center gap-1 font-mono select-none ${
+                        isMe ? 'text-indigo-200 justify-end' : 'text-slate-400 justify-end'
+                      }`}
+                    >
+                      <Clock className="w-3 h-3 opacity-75 shrink-0" />
+                      <span>{formatMessageDateTime(m.createdAt)}</span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

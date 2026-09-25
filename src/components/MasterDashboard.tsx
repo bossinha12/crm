@@ -9,8 +9,9 @@ import {
   Users, UserPlus, FileText, Eye, Key, LogOut, Trash2, 
   TrendingUp, TrendingDown, ClipboardList, ShieldAlert, CheckCircle, Lock, Sparkles,
   Phone, Megaphone, Download, Copy, Check, Search, Plus, MessageCircle, MessageSquare, ExternalLink, RefreshCw, X, Send,
-  RotateCcw, Smartphone, Link2, Loader2
+  RotateCcw, Smartphone, Link2, Loader2, Clock
 } from 'lucide-react';
+import { formatMessageDateTime } from '../lib/formatters';
 import InternalTeamChat from './InternalTeamChat';
 
 interface MasterDashboardProps {
@@ -1392,6 +1393,12 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
                         >
                           <p className="text-sm font-semibold text-slate-800 truncate">{c.clientName}</p>
                           <p className="text-[10px] text-slate-400 mt-0.5 truncate">{c.lastMessage}</p>
+                          {(c.lastMessageAt || c.createdAt) && (
+                            <p className="text-[9px] text-indigo-500 font-mono mt-0.5 flex items-center gap-1">
+                              <Clock className="w-2.5 h-2.5 shrink-0 opacity-70" />
+                              <span>{formatMessageDateTime(c.lastMessageAt || c.createdAt)}</span>
+                            </p>
+                          )}
                         </button>
                         <div className="flex items-center gap-1.5 shrink-0">
                           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
@@ -1445,11 +1452,18 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
                         const isSeller = m.senderType === 'seller';
                         return (
                           <div key={m.id} className="border-l border-slate-800 pl-2 leading-relaxed space-y-1">
-                            <div>
-                              <span className={isSeller ? 'text-blue-400' : isSystem ? 'text-amber-500' : 'text-indigo-400'}>
-                                [{m.senderName}]:
-                              </span>{' '}
-                              <span>{m.text}</span>
+                            <div className="flex items-start justify-between gap-2">
+                              <div>
+                                <span className={isSeller ? 'text-blue-400' : isSystem ? 'text-amber-500' : 'text-indigo-400'}>
+                                  [{m.senderName}]:
+                                </span>{' '}
+                                <span>{m.text}</span>
+                              </div>
+                              {m.createdAt && (
+                                <span className="text-[10px] text-slate-500 whitespace-nowrap shrink-0 font-mono">
+                                  {formatMessageDateTime(m.createdAt)}
+                                </span>
+                              )}
                             </div>
                             {m.imageUrl && (
                               <div className="mt-1">
