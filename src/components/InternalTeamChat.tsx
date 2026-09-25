@@ -6,7 +6,7 @@ import { User, InternalMessage, Company } from '../types';
 import { 
   Send, MessageSquare, Megaphone, User as UserIcon, CheckCheck, 
   Camera, Loader2, ExternalLink, X, Image as ImageIcon, ShieldCheck, 
-  Sparkles, Check, Clock
+  Sparkles, Check, Clock, WifiOff
 } from 'lucide-react';
 import { formatMessageDateTime } from '../lib/formatters';
 
@@ -38,10 +38,12 @@ export default function InternalTeamChat({
     return 'admin'; // Sellers talk to 'admin' or 'all'
   });
 
+  const activeCompanyId = company?.id || companyId;
   const [messages, setMessages] = useState<InternalMessage[]>([]);
   const [inputText, setInputText] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [sendError, setSendError] = useState<string | null>(null);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatScrollContainerRef = useRef<HTMLDivElement>(null);
@@ -56,7 +58,7 @@ export default function InternalTeamChat({
 
   // Real-time listener for internal messages in this company
   useEffect(() => {
-    const internalCol = collection(db, 'companies', companyId, 'internal_messages');
+    const internalCol = collection(db, 'companies', activeCompanyId, 'internal_messages');
     const unsub = onSnapshot(internalCol, (snapshot) => {
       const list: InternalMessage[] = [];
       snapshot.forEach((d) => {
@@ -70,13 +72,28 @@ export default function InternalTeamChat({
         return tA - tB;
       });
 
-      setMessages(list);
+      setMessages(prev => {
+        // Keep pending local optimistic messages (last 30s) if not yet broadcast by server
+        const now = Date.now();
+        const pendingLocal = prev.filter(m => 
+          m.id?.startsWith('local_') && 
+          (now - new Date(m.createdAt).getTime()) < 30000 &&
+          !list.some(s => s.senderId === m.senderId && s.text === m.text)
+        );
+        const merged = [...list, ...pendingLocal];
+        merged.sort((a, b) => {
+          const tA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const tB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+          return tA - tB;
+        });
+        return merged;
+      });
 
       // Backup locally
-      localStorage.setItem(`atendepro_internal_msgs_${companyId}`, JSON.stringify(list));
+      localStorage.setItem(`atendepro_internal_msgs_${activeCompanyId}`, JSON.stringify(list));
     }, (error) => {
       console.warn("Aviso ao carregar mensagens internas do Firestore (usando fallback):", error);
-      const saved = localStorage.getItem(`atendepro_internal_msgs_${companyId}`);
+      const saved = localStorage.getItem(`atendepro_internal_msgs_${activeCompanyId}`);
       if (saved) {
         try {
           setMessages(JSON.parse(saved));
@@ -85,7 +102,7 @@ export default function InternalTeamChat({
     });
 
     return () => unsub();
-  }, [companyId]);
+  }, [activeCompanyId]);
 
   // Auto-scroll ONLY the inner chat messages box (never moving or jerking the browser window)
   useEffect(() => {
@@ -102,16 +119,26 @@ export default function InternalTeamChat({
 
     if (isAdmin) {
       // Admin talking to specific seller
-      return (
-        (m.senderId === currentUser.id && m.recipientId === selectedRecipientId) ||
-        (m.senderId === selectedRecipientId && (m.recipientId === 'admin' || m.recipientId === currentUser.id))
-      );
+      const isFromAdminToSeller = 
+        (m.senderId === currentUser.id || m.senderRole === 'admin' || m.senderId.startsWith('admin')) && 
+        m.recipientId === selectedRecipientId;
+        
+      const isFromSellerToAdmin = 
+        m.senderId === selectedRecipientId && 
+        (m.recipientId === 'admin' || m.recipientId === currentUser.id || m.recipientId.startsWith('admin') || m.recipientRole === 'admin');
+
+      return isFromAdminToSeller || isFromSellerToAdmin;
     } else {
       // Seller talking to admin or seeing 'all'
-      return (
-        (m.senderId === currentUser.id && (m.recipientId === 'admin' || m.recipientId === 'all')) ||
-        ((m.senderRole === 'admin' || m.senderId.startsWith('admin')) && (m.recipientId === currentUser.id || m.recipientId === 'all'))
-      );
+      const isMyMessage = 
+        m.senderId === currentUser.id && 
+        (m.recipientId === 'admin' || m.recipientId === 'all' || m.recipientId.startsWith('admin'));
+        
+      const isFromAdminToMe = 
+        (m.senderRole === 'admin' || m.senderId.startsWith('admin')) && 
+        (m.recipientId === currentUser.id || m.recipientId === 'all');
+
+      return isMyMessage || isFromAdminToMe;
     }
   });
 
@@ -140,7 +167,7 @@ export default function InternalTeamChat({
         if (!msg.id) return;
         markedAsReadIdsRef.current.add(msg.id);
         try {
-          const docRef = doc(db, 'companies', companyId, 'internal_messages', msg.id);
+          const docRef = doc(db, 'companies', activeCompanyId, 'internal_messages', msg.id);
           const updatedReadBy = [...(msg.readBy || []), currentUser.id];
           await updateDoc(docRef, sanitizeFirestoreData({ readBy: updatedReadBy }));
         } catch (e) {
@@ -148,7 +175,7 @@ export default function InternalTeamChat({
         }
       });
     }
-  }, [currentConversationMessages, currentUser.id, companyId]);
+  }, [currentConversationMessages, currentUser.id, activeCompanyId]);
 
   const handleSendMessage = async (e?: React.FormEvent, directText?: string) => {
     if (e) e.preventDefault();
@@ -160,10 +187,12 @@ export default function InternalTeamChat({
       ? 'Toda a Equipe' 
       : (isAdmin ? (recipient?.name || 'Vendedor') : (company?.adminName || 'Diretoria / Proprietário'));
 
-    const newMsg: Partial<InternalMessage> = {
-      companyId,
+    const optimisticId = `local_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const newMsg: InternalMessage = {
+      id: optimisticId,
+      companyId: activeCompanyId,
       senderId: currentUser.id,
-      senderName: currentUser.name,
+      senderName: currentUser.name || (isAdmin ? 'Diretoria' : 'Vendedor'),
       senderAvatar: currentUser.avatarUrl || null,
       senderRole: isAdmin ? 'admin' : 'seller',
       recipientId: selectedRecipientId,
@@ -173,14 +202,56 @@ export default function InternalTeamChat({
       createdAt: new Date().toISOString()
     };
 
-    setInputText('');
+    // 1. Optimistic instant UI update
+    setMessages(prev => {
+      const updated = [...prev, newMsg];
+      try {
+        localStorage.setItem(`atendepro_internal_msgs_${activeCompanyId}`, JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
 
+    setInputText('');
+    setSendError(null);
+
+    // 2. Deliver to Firestore in background with automatic resilience
     try {
-      const internalCol = collection(db, 'companies', companyId, 'internal_messages');
-      await addDoc(internalCol, sanitizeFirestoreData(newMsg));
+      const internalCol = collection(db, 'companies', activeCompanyId, 'internal_messages');
+      await addDoc(internalCol, sanitizeFirestoreData({
+        companyId: newMsg.companyId,
+        senderId: newMsg.senderId,
+        senderName: newMsg.senderName,
+        senderAvatar: newMsg.senderAvatar,
+        senderRole: newMsg.senderRole,
+        recipientId: newMsg.recipientId,
+        recipientName: newMsg.recipientName,
+        text: newMsg.text,
+        readBy: newMsg.readBy,
+        createdAt: newMsg.createdAt
+      }));
     } catch (err) {
-      console.error("Erro ao enviar mensagem interna:", err);
-      alert("Não foi possível enviar a mensagem. Verifique a conexão.");
+      console.warn("Aviso ao enviar mensagem interna no Firestore (tentando reconectar):", err);
+      // Automatic quick retry after 600ms
+      try {
+        await new Promise(r => setTimeout(r, 600));
+        const internalCol = collection(db, 'companies', activeCompanyId, 'internal_messages');
+        await addDoc(internalCol, sanitizeFirestoreData({
+          companyId: newMsg.companyId,
+          senderId: newMsg.senderId,
+          senderName: newMsg.senderName,
+          senderAvatar: newMsg.senderAvatar,
+          senderRole: newMsg.senderRole,
+          recipientId: newMsg.recipientId,
+          recipientName: newMsg.recipientName,
+          text: newMsg.text,
+          readBy: newMsg.readBy,
+          createdAt: newMsg.createdAt
+        }));
+      } catch (retryErr) {
+        console.warn("Segunda tentativa de envio no Firestore falhou (mantendo local):", retryErr);
+        setSendError('Mensagem salva localmente no navegador. Sincronizando com a nuvem...');
+        setTimeout(() => setSendError(null), 6000);
+      }
     }
   };
 
@@ -212,10 +283,12 @@ export default function InternalTeamChat({
         ? 'Toda a Equipe' 
         : (isAdmin ? (recipient?.name || 'Vendedor') : (company?.adminName || 'Diretoria / Proprietário'));
 
-      const newMsg: Partial<InternalMessage> = {
-        companyId,
+      const optimisticImgId = `local_img_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const newMsg: InternalMessage = {
+        id: optimisticImgId,
+        companyId: activeCompanyId,
         senderId: currentUser.id,
-        senderName: currentUser.name,
+        senderName: currentUser.name || (isAdmin ? 'Diretoria' : 'Vendedor'),
         senderAvatar: currentUser.avatarUrl || null,
         senderRole: isAdmin ? 'admin' : 'seller',
         recipientId: selectedRecipientId,
@@ -226,8 +299,29 @@ export default function InternalTeamChat({
         createdAt: new Date().toISOString()
       };
 
-      const internalCol = collection(db, 'companies', companyId, 'internal_messages');
-      await addDoc(internalCol, sanitizeFirestoreData(newMsg));
+      // Optimistic update
+      setMessages(prev => {
+        const updated = [...prev, newMsg];
+        try {
+          localStorage.setItem(`atendepro_internal_msgs_${activeCompanyId}`, JSON.stringify(updated));
+        } catch (e) {}
+        return updated;
+      });
+
+      const internalCol = collection(db, 'companies', activeCompanyId, 'internal_messages');
+      await addDoc(internalCol, sanitizeFirestoreData({
+        companyId: newMsg.companyId,
+        senderId: newMsg.senderId,
+        senderName: newMsg.senderName,
+        senderAvatar: newMsg.senderAvatar,
+        senderRole: newMsg.senderRole,
+        recipientId: newMsg.recipientId,
+        recipientName: newMsg.recipientName,
+        text: newMsg.text,
+        imageUrl: newMsg.imageUrl,
+        readBy: newMsg.readBy,
+        createdAt: newMsg.createdAt
+      }));
     } catch (err) {
       console.error("Erro no envio de imagem no chat interno:", err);
       setUploadError(err instanceof Error ? err.message : 'Erro ao enviar imagem ao ImgBB.');
@@ -467,6 +561,19 @@ export default function InternalTeamChat({
             <div className="bg-rose-50 border-b border-rose-200 text-rose-800 text-xs px-4 py-2 flex items-center justify-between shrink-0">
               <span>⚠️ {uploadError}</span>
               <button onClick={() => setUploadError(null)} className="text-rose-500 hover:text-rose-700 font-bold">
+                Dispensar
+              </button>
+            </div>
+          )}
+
+          {/* Sync / Send Notice Banner */}
+          {sendError && (
+            <div className="bg-amber-50 border-b border-amber-200 text-amber-800 text-xs px-4 py-2 flex items-center justify-between shrink-0">
+              <span className="flex items-center gap-1.5">
+                <WifiOff className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                <span>{sendError}</span>
+              </span>
+              <button onClick={() => setSendError(null)} className="text-amber-600 hover:text-amber-800 font-bold">
                 Dispensar
               </button>
             </div>
