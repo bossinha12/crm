@@ -2,27 +2,87 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { doc, setDoc, collection, onSnapshot, query, orderBy, addDoc, updateDoc, getDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, sanitizeFirestoreData } from '../lib/firebase';
 import { uploadToImgBB } from '../lib/imgbb';
-import { Chat, Message, ChatStatus, Lead } from '../types';
+import { Chat, Message, ChatStatus, Lead, Company } from '../types';
 import { 
   Send, MessageSquare, Phone, User, CheckCheck, Landmark, RefreshCw, 
   XCircle, Image as ImageIcon, Camera, Loader2, ExternalLink, X, ShieldCheck,
-  Clock
+  Clock, Bell, BellRing, BellOff, Calendar, CheckCircle2, Sparkles, AlertCircle
 } from 'lucide-react';
 import { formatMessageDateTime } from '../lib/formatters';
+import { crmAlarm } from '../lib/audio';
+import { checkOperatingHours, OperatingHoursStatus } from '../lib/operatingHours';
 
 interface ClientWidgetProps {
   companyId: string;
   companyName: string;
   companyLogo?: string;
+  company?: Company | null;
   onGoBack?: () => void;
 }
 
-export default function ClientWidget({ companyId, companyName, companyLogo, onGoBack }: ClientWidgetProps) {
+export default function ClientWidget({ companyId, companyName, companyLogo, company, onGoBack }: ClientWidgetProps) {
   const [chatId, setChatId] = useState<string | null>(localStorage.getItem(`atendepro_client_chat_id`));
   const [activeChat, setActiveChat] = useState<Chat | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
+
+  // Web Notification State
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>(() => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      return Notification.permission;
+    }
+    return 'default';
+  });
+  const [showNotificationPrompt, setShowNotificationPrompt] = useState<boolean>(() => {
+    return localStorage.getItem('atendepro_notif_prompt_dismissed') !== 'true';
+  });
+  const [testNotifSent, setTestNotifSent] = useState(false);
+
+  // Live Operating Hours calculation
+  const operatingStatus = useMemo(() => {
+    return checkOperatingHours(company?.operatingHours);
+  }, [company?.operatingHours]);
+
+  const prevMessagesLengthRef = useRef(0);
+  const originalTitleRef = useRef(typeof document !== 'undefined' ? document.title : '');
+
+  // Reset tab title upon user focus
+  useEffect(() => {
+    const handleFocus = () => {
+      if (originalTitleRef.current && typeof document !== 'undefined') {
+        document.title = originalTitleRef.current;
+      }
+    };
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, []);
+
+  // Request browser notification permission
+  const handleRequestNotificationPermission = async () => {
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      alert('Seu navegador não oferece suporte a notificações na tela.');
+      return;
+    }
+
+    try {
+      const perm = await Notification.requestPermission();
+      setNotificationPermission(perm);
+      if (perm === 'granted') {
+        setTestNotifSent(true);
+        crmAlarm.playMessageNotification();
+        try {
+          new Notification(`${companyName} • Notificações Ativadas!`, {
+            body: 'Tudo pronto! Você receberá avisos sonoros e na tela do seu celular assim que nosso vendedor responder.',
+            icon: companyLogo || '/vite.svg'
+          });
+        } catch (e) {}
+        setTimeout(() => setTestNotifSent(false), 5000);
+      }
+    } catch (e) {
+      console.warn("Erro ao solicitar permissão de notificação:", e);
+    }
+  };
 
   // Form Fields for new chat request
   const [clientName, setClientName] = useState(() => localStorage.getItem('atendepro_client_name') || '');
@@ -125,6 +185,37 @@ export default function ClientWidget({ companyId, companyName, companyLogo, onGo
         const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
         return timeA - timeB;
       });
+
+      // Trigger audio & push notification when new message arrives from seller
+      if (prevMessagesLengthRef.current > 0 && msgs.length > prevMessagesLengthRef.current) {
+        const latestMsg = msgs[msgs.length - 1];
+        if (latestMsg && latestMsg.senderType === 'seller') {
+          // 1. Play pleasant audio chime
+          crmAlarm.playMessageNotification();
+
+          // 2. Vibrate mobile device if supported
+          if (typeof navigator !== 'undefined' && navigator.vibrate) {
+            try { navigator.vibrate([200, 100, 200]); } catch (e) {}
+          }
+
+          // 3. Show System Notification on screen if granted
+          if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+            try {
+              new Notification(`${companyName} • ${latestMsg.senderName || 'Atendente'}`, {
+                body: latestMsg.text || (latestMsg.imageUrl ? 'Enviou uma foto de produto' : 'Respondeu seu chamado'),
+                icon: companyLogo || '/vite.svg',
+                tag: `atendepro-msg-${latestMsg.id || Date.now()}`
+              });
+            } catch (e) {}
+          }
+
+          // 4. Flash page title if in background
+          if (typeof document !== 'undefined' && document.hidden) {
+            document.title = `🔔 (1 Nova Resposta) ${companyName}`;
+          }
+        }
+      }
+      prevMessagesLengthRef.current = msgs.length;
 
       setMessages(msgs);
       // Save backup of messages
@@ -504,9 +595,23 @@ export default function ClientWidget({ companyId, companyName, companyLogo, onGo
               )}
             </div>
 
-            <span className="text-[11px] font-bold text-indigo-200 tracking-wider uppercase px-2.5 py-0.5 rounded-full bg-white/10 backdrop-blur-sm border border-white/10 mb-1.5">
-              Atendimento Online
-            </span>
+            {operatingStatus.isConfigured ? (
+              operatingStatus.isOpen ? (
+                <span className="text-[11px] font-bold text-emerald-200 tracking-wider uppercase px-2.5 py-0.5 rounded-full bg-emerald-500/20 backdrop-blur-sm border border-emerald-400/30 mb-1.5 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                  <span>Aberto Agora • {operatingStatus.scheduleText}</span>
+                </span>
+              ) : (
+                <span className="text-[11px] font-bold text-amber-200 tracking-wider uppercase px-2.5 py-0.5 rounded-full bg-amber-500/20 backdrop-blur-sm border border-amber-400/30 mb-1.5 flex items-center gap-1.5">
+                  <Clock className="w-3 h-3 text-amber-300" />
+                  <span>Fora do Expediente • {operatingStatus.scheduleText}</span>
+                </span>
+              )
+            ) : (
+              <span className="text-[11px] font-bold text-indigo-200 tracking-wider uppercase px-2.5 py-0.5 rounded-full bg-white/10 backdrop-blur-sm border border-white/10 mb-1.5">
+                Atendimento Online
+              </span>
+            )}
             <h2 className="text-2xl font-extrabold text-white tracking-tight">{companyName}</h2>
             <p className="text-xs text-indigo-100/90 mt-1 max-w-xs leading-relaxed">
               Inicie uma conversa em tempo real com nossa equipe de suporte e vendas
@@ -516,6 +621,27 @@ export default function ClientWidget({ companyId, companyName, companyLogo, onGo
 
         {/* Content Form Body */}
         <form onSubmit={handleStartChat} className="p-6 sm:p-7 space-y-4">
+          {/* Offline notice if store is currently closed */}
+          {!operatingStatus.isOpen && (
+            <div className="p-3.5 bg-amber-50 border border-amber-200/80 rounded-2xl text-amber-900 text-xs flex items-start gap-3 shadow-sm">
+              <Clock className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p className="font-bold text-amber-950">Aviso de Horário de Atendimento:</p>
+                <p className="text-amber-800 leading-relaxed text-[11px]">
+                  {operatingStatus.message}
+                </p>
+                {operatingStatus.nextOpenText && (
+                  <p className="text-[11px] font-semibold text-amber-900 flex items-center gap-1">
+                    <Calendar className="w-3 h-3 text-amber-600" />
+                    <span>{operatingStatus.nextOpenText}</span>
+                  </p>
+                )}
+                <p className="text-[10px] text-amber-700/90 pt-0.5 font-medium">
+                  ✅ Deixe seu nome, WhatsApp e mensagem abaixo. Seu chamado ficará registrado na fila e nossa equipe responderá você assim que abrirmos!
+                </p>
+              </div>
+            </div>
+          )}
           <div className="space-y-1">
             <label className="text-xs font-bold text-slate-600 uppercase tracking-wider block mb-1">
               Como podemos lhe chamar? *
@@ -681,6 +807,67 @@ export default function ClientWidget({ companyId, companyName, companyLogo, onGo
           </button>
         </div>
       </div>
+
+      {/* Web Notification Permission Prompt Banner */}
+      {notificationPermission !== 'granted' && showNotificationPrompt && (
+        <div className="bg-indigo-950 border-b border-indigo-800 px-4 py-2.5 text-white text-xs flex items-center justify-between gap-3 shadow-inner">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-7 h-7 rounded-lg bg-indigo-500/20 text-indigo-300 flex items-center justify-center shrink-0">
+              <BellRing className="w-4 h-4 text-amber-300 animate-bounce" />
+            </div>
+            <div className="min-w-0">
+              <p className="font-bold leading-tight text-white">Receber aviso quando o vendedor responder?</p>
+              <p className="text-[11px] text-indigo-200 line-clamp-1">
+                Ative para o seu celular apitar e mostrar a resposta mesmo se você fechar a página.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={handleRequestNotificationPermission}
+              className="px-3 py-1.5 bg-amber-400 hover:bg-amber-300 active:bg-amber-500 text-slate-950 font-extrabold text-[11px] rounded-lg transition-colors cursor-pointer shadow-sm flex items-center gap-1"
+            >
+              <Bell className="w-3.5 h-3.5" />
+              <span>Ativar Alerta</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setShowNotificationPrompt(false);
+                localStorage.setItem('atendepro_notif_prompt_dismissed', 'true');
+              }}
+              className="p-1.5 text-indigo-300 hover:text-white rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
+              title="Dispensar"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Test Notification Confirmation */}
+      {testNotifSent && (
+        <div className="bg-emerald-900 border-b border-emerald-700 px-4 py-2 text-white text-xs flex items-center gap-2 animate-fadeIn">
+          <CheckCircle2 className="w-4 h-4 text-emerald-300 shrink-0" />
+          <span>✅ Notificações Ativadas! Você receberá avisos sonoros e na tela do seu celular assim que nosso vendedor responder.</span>
+        </div>
+      )}
+
+      {/* Operating Hours Alert inside Active Chat (if closed) */}
+      {!operatingStatus.isOpen && (
+        <div className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-2 text-amber-900 text-[11px] flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <Clock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+            <span className="truncate">
+              <strong>Fora do Expediente:</strong> {operatingStatus.nextOpenText || operatingStatus.scheduleText}
+            </span>
+          </div>
+          <span className="text-[10px] bg-amber-200 text-amber-950 px-2 py-0.5 rounded-full font-bold shrink-0">
+            {operatingStatus.scheduleText}
+          </span>
+        </div>
+      )}
 
       {syncError && (
         <div className="bg-amber-50 border-b border-amber-200 text-amber-800 text-[11px] sm:text-xs px-4 py-2.5 flex items-center justify-between gap-2">
