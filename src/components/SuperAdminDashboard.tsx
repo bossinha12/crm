@@ -517,7 +517,7 @@ export default function SuperAdminDashboard({
       id: companyId,
       name: formName.trim(),
       slug: rawSlug,
-      logoUrl: formLogoUrl.trim() || 'https://i.postimg.cc/8CdttXNK/Whats-App-Image-2026-06-10-at-14-30-14.jpg',
+      logoUrl: formLogoUrl.trim() || '',
       adminName: formAdminName.trim() || 'Administrador',
       adminPassword: formAdminPassword.trim() || '123456',
       maxSellers: maxSellersNum,

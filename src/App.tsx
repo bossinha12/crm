@@ -14,6 +14,7 @@ import BlockedLicenseScreen from './components/BlockedLicenseScreen';
 import { 
   Compass, Headphones, ShieldAlert, Sparkles, LogIn, ChevronRight, HelpCircle, ShieldCheck, Settings2 
 } from 'lucide-react';
+import { updateDynamicManifestAndIcons } from './lib/dynamicPwa';
 
 export default function App() {
   // Parse company and view from URL query parameters
@@ -61,19 +62,42 @@ export default function App() {
   });
 
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
+    // Check if the URL requests a specific login view (vendedor, gerente, dono, login)
+    const params = new URLSearchParams(window.location.search);
+    const viewParam = (params.get('view') || '').toLowerCase();
+    const roleParam = (params.get('role') || params.get('tipo') || '').toLowerCase();
+    const isLoginRequested = viewParam === 'login' || 
+                             viewParam === 'vendedor' || 
+                             viewParam === 'gerente' || 
+                             viewParam === 'dono' || 
+                             viewParam === 'owner' || 
+                             viewParam === 'seller' ||
+                             roleParam === 'gerente' || 
+                             roleParam === 'dono' || 
+                             roleParam === 'admin' ||
+                             params.get('login') === 'true' || 
+                             params.get('logout') === 'true';
+
+    // Clear leaking global sessions from older versions
+    try {
+      localStorage.removeItem('crm_current_user');
+      localStorage.removeItem('crm_current_user_atendepro');
+    } catch (e) {}
+
+    // When clicking a link that targets commercial / login areas, prompt for credentials!
+    if (isLoginRequested) {
+      return null;
+    }
+
     const activeId = getCompanyIdentifierFromUrl().toLowerCase();
     const saved = localStorage.getItem(`crm_current_user_${activeId}`) || 
-                  localStorage.getItem(`crm_current_user_company_${activeId}`) ||
-                  localStorage.getItem(`crm_current_user_${companyId}`) ||
-                  localStorage.getItem('crm_current_user_atendepro') ||
-                  localStorage.getItem('crm_current_user');
+                  localStorage.getItem(`crm_current_user_company_${activeId}`);
     if (saved) {
       try {
         const parsed: User = JSON.parse(saved);
         if (parsed && !parsed.avatarUrl) {
           const savedAvatar = localStorage.getItem(`crm_seller_avatar_${activeId}_${parsed.id}`) || 
-                              localStorage.getItem(`crm_seller_avatar_${parsed.name.trim().toLowerCase()}`) ||
-                              localStorage.getItem(`crm_seller_avatar_global_${parsed.id}`);
+                              localStorage.getItem(`crm_seller_avatar_${parsed.name.trim().toLowerCase()}`);
           if (savedAvatar) {
             parsed.avatarUrl = savedAvatar;
           }
@@ -86,31 +110,34 @@ export default function App() {
     return null;
   });
 
-  // Watch for session changes to persist/remove from localStorage across aliases
+  // Watch for session changes to persist/remove from localStorage strictly for this company
   useEffect(() => {
     const rawTarget = getCompanyIdentifierFromUrl().toLowerCase();
+    // Always clear generic global keys to prevent session contamination across companies
+    try {
+      localStorage.removeItem('crm_current_user');
+      localStorage.removeItem('crm_current_user_atendepro');
+    } catch (e) {}
+
     if (currentUser) {
       localStorage.setItem(`crm_current_user_${companyId}`, JSON.stringify(currentUser));
       localStorage.setItem(`crm_current_user_${rawTarget}`, JSON.stringify(currentUser));
       localStorage.setItem(`crm_current_user_company_${rawTarget}`, JSON.stringify(currentUser));
-      localStorage.setItem('crm_current_user', JSON.stringify(currentUser));
       if (currentUser.avatarUrl) {
         localStorage.setItem(`crm_seller_avatar_${companyId}_${currentUser.id}`, currentUser.avatarUrl);
         localStorage.setItem(`crm_seller_avatar_${rawTarget}_${currentUser.id}`, currentUser.avatarUrl);
         localStorage.setItem(`crm_seller_avatar_${currentUser.name.trim().toLowerCase()}`, currentUser.avatarUrl);
-        localStorage.setItem(`crm_seller_avatar_global_${currentUser.id}`, currentUser.avatarUrl);
       }
     } else {
       localStorage.removeItem(`crm_current_user_${companyId}`);
       localStorage.removeItem(`crm_current_user_${rawTarget}`);
       localStorage.removeItem(`crm_current_user_company_${rawTarget}`);
-      localStorage.removeItem('crm_current_user');
     }
   }, [currentUser, companyId]);
 
   // Real-time synchronization of currentUser with Firestore (avatar and profile updates)
   useEffect(() => {
-    if (!currentUser?.id || currentUser.id === 'admin-larissa') return;
+    if (!currentUser?.id) return;
     const userDocRef = doc(db, 'companies', companyId, 'users', currentUser.id);
     const unsub = onSnapshot(userDocRef, (snap) => {
       if (snap.exists()) {
@@ -167,8 +194,18 @@ export default function App() {
       const activeCompId = customCompany ? customCompany.trim() : 'atendepro_default';
       if (customCompany && customCompany.trim() !== companyId) {
         setCompanyId(customCompany.trim());
+        // Company changed in the URL! Clear currentUser so another company's session is NEVER reused!
+        setCurrentUser(null);
       } else if (!customCompany && companyId !== 'atendepro_default') {
         setCompanyId('atendepro_default');
+        setCurrentUser(null);
+      }
+
+      // If user navigated to login/vendedor/gerente, reset currentUser so login is explicitly requested!
+      if (viewParam === 'gerente' || viewParam === 'dono' || viewParam === 'owner' || viewParam === 'vendedor' || viewParam === 'seller' || viewParam === 'login' || roleParam === 'gerente' || roleParam === 'dono' || roleParam === 'admin') {
+        if (params.get('autologin') !== 'true') {
+          setCurrentUser(null);
+        }
       }
 
       if (isSuper) {
@@ -208,25 +245,14 @@ export default function App() {
     };
   }, [companyId]);
 
-  // Dynamically update document title and favicon based on active company
+  // Dynamically update document title, favicon, and PWA Web Manifest based on active company
   useEffect(() => {
     if (isSuperAdminView) {
       document.title = 'Painel de Licenças | Gestão de Empresas';
-    } else if (company?.name) {
-      document.title = `${company.name} - Atendimento Online`;
-      
-      // Update or create favicon
-      if (company.logoUrl) {
-        let link: HTMLLinkElement | null = document.querySelector("link[rel*='icon']");
-        if (!link) {
-          link = document.createElement('link');
-          link.rel = 'shortcut icon';
-          document.getElementsByTagName('head')[0].appendChild(link);
-        }
-        link.href = company.logoUrl;
-      }
+    } else {
+      updateDynamicManifestAndIcons(company);
     }
-  }, [isSuperAdminView, company?.name, company?.logoUrl]);
+  }, [isSuperAdminView, company]);
 
   // Initialize Firebase Auth & Real-Time Companies Collection Listener
   useEffect(() => {

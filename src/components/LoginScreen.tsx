@@ -28,7 +28,7 @@ export default function LoginScreen({
   const configuredAdminName = company?.adminName || 'Administrador';
   const configuredAdminPass = company?.adminPassword || 'admin';
 
-  const [username, setUsername] = useState(configuredAdminName);
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

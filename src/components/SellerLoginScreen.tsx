@@ -191,9 +191,8 @@ export default function SellerLoginScreen({
         localStorage.setItem(`crm_seller_avatar_global_${targetSeller.id}`, targetSeller.avatarUrl);
       }
 
-      // Save user session in localStorage
+      // Save user session in localStorage strictly for this company
       localStorage.setItem(`crm_current_user_${companyId}`, JSON.stringify(targetSeller));
-      localStorage.setItem('crm_current_user_atendepro', JSON.stringify(targetSeller));
 
       // INSTANT Login success!
       onLoginSuccess(targetSeller);

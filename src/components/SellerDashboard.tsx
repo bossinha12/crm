@@ -72,6 +72,7 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
 
   // Keep a synced ref of chats to prevent re-subscriptions in dependent effects
   const chatsRef = useRef<Chat[]>([]);
+  const prevAlertCountRef = useRef(0);
   useEffect(() => {
     chatsRef.current = chats;
   }, [chats]);
@@ -160,13 +161,29 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
       setAvailableChats(list);
 
       // Sound management rules: Alarm rings in loop if there are pending unassigned calls OR unread client messages
-      if (pendingAlertCount > 0 && !crmAlarm.getMuted()) {
-        setAlarmIsSounding(true);
-        crmAlarm.start();
+      if (pendingAlertCount > 0) {
+        if (!crmAlarm.getMuted()) {
+          setAlarmIsSounding(true);
+          crmAlarm.start();
+        }
+
+        // Trigger native mobile notification if a new client or message arrived
+        if (pendingAlertCount > prevAlertCountRef.current) {
+          const newChat = list.find(c => c.status === ChatStatus.NEW);
+          const callerName = newChat?.clientName || 'Novo Cliente';
+          const storeName = company?.name || 'Sua Loja';
+          sendPwaPushNotification(`🔔 NOVO CLIENTE EM ${storeName.toUpperCase()}`, {
+            body: `${callerName} está aguardando atendimento agora! Toque para assumir o chamado.`,
+            tag: 'atendepro-seller-alert',
+            renotify: true,
+            companyLogo: company?.logoUrl || undefined
+          });
+        }
       } else {
         setAlarmIsSounding(false);
         crmAlarm.stop();
       }
+      prevAlertCountRef.current = pendingAlertCount;
     }, (error) => {
       console.warn("Aviso ao carregar chats do Firestore em tempo real (usando contingência):", error);
     });

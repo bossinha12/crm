@@ -158,21 +158,20 @@ class CRMAlarm {
 
           const t = currentCtx.currentTime;
 
-          // Dual-frequency chords (Standard European / Brazilian PBX Ringtone + Modern WhatsApp Attention)
-          // Pulse 1
+          // Modern Melodic Notification Call Chime (Warm, crystalline chords with gentle bell decay)
+          // Note 1: E5 (659Hz) + B5 (988Hz)
           const osc1 = currentCtx.createOscillator();
           const osc2 = currentCtx.createOscillator();
           const gain1 = currentCtx.createGain();
 
-          osc1.type = 'sawtooth';
-          osc2.type = 'sine';
-          osc1.frequency.setValueAtTime(660, t); // 660Hz
-          osc2.frequency.setValueAtTime(880, t); // 880Hz
+          osc1.type = 'sine';
+          osc2.type = 'triangle';
+          osc1.frequency.setValueAtTime(659.25, t);
+          osc2.frequency.setValueAtTime(987.77, t);
 
           gain1.gain.setValueAtTime(0, t);
-          gain1.gain.linearRampToValueAtTime(0.28, t + 0.05);
-          gain1.gain.setValueAtTime(0.25, t + 0.28);
-          gain1.gain.exponentialRampToValueAtTime(0.001, t + 0.38);
+          gain1.gain.linearRampToValueAtTime(0.25, t + 0.03);
+          gain1.gain.exponentialRampToValueAtTime(0.001, t + 0.32);
 
           osc1.connect(gain1);
           osc2.connect(gain1);
@@ -180,32 +179,54 @@ class CRMAlarm {
 
           osc1.start(t);
           osc2.start(t);
-          osc1.stop(t + 0.40);
-          osc2.stop(t + 0.40);
+          osc1.stop(t + 0.35);
+          osc2.stop(t + 0.35);
 
-          // Pulse 2 (Short interval after Pulse 1)
+          // Note 2: G#5 (830Hz) + E6 (1318Hz)
           const osc3 = currentCtx.createOscillator();
           const osc4 = currentCtx.createOscillator();
           const gain2 = currentCtx.createGain();
 
-          osc3.type = 'sawtooth';
-          osc4.type = 'sine';
-          osc3.frequency.setValueAtTime(660, t + 0.45);
-          osc4.frequency.setValueAtTime(880, t + 0.45);
+          osc3.type = 'sine';
+          osc4.type = 'triangle';
+          osc3.frequency.setValueAtTime(830.61, t + 0.16);
+          osc4.frequency.setValueAtTime(1318.51, t + 0.16);
 
-          gain2.gain.setValueAtTime(0, t + 0.45);
-          gain2.gain.linearRampToValueAtTime(0.28, t + 0.50);
-          gain2.gain.setValueAtTime(0.25, t + 0.78);
-          gain2.gain.exponentialRampToValueAtTime(0.001, t + 0.88);
+          gain2.gain.setValueAtTime(0, t + 0.16);
+          gain2.gain.linearRampToValueAtTime(0.28, t + 0.19);
+          gain2.gain.exponentialRampToValueAtTime(0.001, t + 0.50);
 
           osc3.connect(gain2);
           osc4.connect(gain2);
           gain2.connect(currentCtx.destination);
 
-          osc3.start(t + 0.45);
-          osc4.start(t + 0.45);
-          osc3.stop(t + 0.90);
-          osc4.stop(t + 0.90);
+          osc3.start(t + 0.16);
+          osc4.start(t + 0.16);
+          osc3.stop(t + 0.55);
+          osc4.stop(t + 0.55);
+
+          // Note 3: B5 (988Hz) + G#6 (1661Hz) - Resonant peak bell
+          const osc5 = currentCtx.createOscillator();
+          const osc6 = currentCtx.createOscillator();
+          const gain3 = currentCtx.createGain();
+
+          osc5.type = 'sine';
+          osc6.type = 'triangle';
+          osc5.frequency.setValueAtTime(987.77, t + 0.32);
+          osc6.frequency.setValueAtTime(1661.22, t + 0.32);
+
+          gain3.gain.setValueAtTime(0, t + 0.32);
+          gain3.gain.linearRampToValueAtTime(0.32, t + 0.35);
+          gain3.gain.exponentialRampToValueAtTime(0.001, t + 0.85);
+
+          osc5.connect(gain3);
+          osc6.connect(gain3);
+          gain3.connect(currentCtx.destination);
+
+          osc5.start(t + 0.32);
+          osc6.start(t + 0.32);
+          osc5.stop(t + 0.90);
+          osc6.stop(t + 0.90);
 
         } catch (e) {
           console.error("Audio Synthesis Ring Error:", e);

@@ -1,16 +1,26 @@
 // Helper for cross-platform PWA / Mobile native notifications
+export interface ExtendedNotificationOptions extends NotificationOptions {
+  vibrate?: number[];
+  renotify?: boolean;
+  requireInteraction?: boolean;
+  url?: string;
+  companyLogo?: string;
+}
+
 export async function sendPwaPushNotification(
   title: string,
-  options: NotificationOptions & { url?: string } = {}
+  options: ExtendedNotificationOptions = {}
 ) {
   if (typeof window === 'undefined') return;
 
   if (!('Notification' in window)) return;
   if (Notification.permission !== 'granted') return;
 
-  const notifOptions: NotificationOptions = {
-    icon: 'https://i.postimg.cc/8CdttXNK/Whats-App-Image-2026-06-10-at-14-30-14.jpg',
-    badge: 'https://i.postimg.cc/8CdttXNK/Whats-App-Image-2026-06-10-at-14-30-14.jpg',
+  const resolvedIcon = options.companyLogo || options.icon || '/vite.svg';
+
+  const notifOptions: any = {
+    icon: resolvedIcon,
+    badge: resolvedIcon,
     vibrate: [500, 200, 500, 200, 500, 200, 800],
     requireInteraction: true,
     tag: options.tag || 'atendepro-alert',
