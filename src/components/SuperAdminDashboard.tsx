@@ -79,13 +79,6 @@ export default function SuperAdminDashboard({
   const [formCustomExpiryDate, setFormCustomExpiryDate] = useState('');
   const [formMaxSellers, setFormMaxSellers] = useState('5');
 
-  // Operating Hours State
-  const [formHoursEnabled, setFormHoursEnabled] = useState(false);
-  const [formHoursDays, setFormHoursDays] = useState<number[]>([1, 2, 3, 4, 5]);
-  const [formHoursStart, setFormHoursStart] = useState('08:00');
-  const [formHoursEnd, setFormHoursEnd] = useState('18:00');
-  const [formHoursOfflineMsg, setFormHoursOfflineMsg] = useState('No momento estamos fora do nosso expediente. Deixe sua mensagem e contato que atenderemos você assim que abrirmos!');
-
   // Password Change Modal for Companies
   const [passwordModalCompany, setPasswordModalCompany] = useState<Company | null>(null);
   const [newMasterPassword, setNewMasterPassword] = useState('');
@@ -261,11 +254,6 @@ export default function SuperAdminDashboard({
     setFormExpiryDays('30');
     setFormCustomExpiryDate('');
     setFormMaxSellers('5');
-    setFormHoursEnabled(false);
-    setFormHoursDays([1, 2, 3, 4, 5]);
-    setFormHoursStart('08:00');
-    setFormHoursEnd('18:00');
-    setFormHoursOfflineMsg('No momento estamos fora do nosso expediente. Deixe sua mensagem e contato que atenderemos você assim que abrirmos!');
     setIsModalOpen(true);
   };
 
@@ -279,13 +267,6 @@ export default function SuperAdminDashboard({
     setFormAdminPassword(comp.adminPassword || '123456');
     setFormLicenseStatus(comp.license?.status || 'active');
     setFormMaxSellers(String(comp.license?.maxSellers ?? comp.maxSellers ?? '5'));
-    
-    // Operating Hours
-    setFormHoursEnabled(comp.operatingHours?.enabled || false);
-    setFormHoursDays(comp.operatingHours?.days && comp.operatingHours.days.length > 0 ? comp.operatingHours.days : [1, 2, 3, 4, 5]);
-    setFormHoursStart(comp.operatingHours?.startHour || '08:00');
-    setFormHoursEnd(comp.operatingHours?.endHour || '18:00');
-    setFormHoursOfflineMsg(comp.operatingHours?.offlineMessage || 'No momento estamos fora do nosso expediente. Deixe sua mensagem e contato que atenderemos você assim que abrirmos!');
     
     const isLife = comp.license?.isLifetime || comp.license?.planType === 'lifetime';
     setFormPlanType(isLife ? 'lifetime' : (comp.license?.planType || (comp.license?.status === 'trial' ? 'trial' : 'monthly')));
@@ -533,13 +514,6 @@ export default function SuperAdminDashboard({
         contactPhone: formContactPhone.trim(),
         notes: formNotes.trim(),
         lastPaymentDate: new Date().toISOString()
-      },
-      operatingHours: {
-        enabled: formHoursEnabled,
-        days: formHoursDays,
-        startHour: formHoursStart || '08:00',
-        endHour: formHoursEnd || '18:00',
-        offlineMessage: formHoursOfflineMsg.trim()
       }
     };
 
@@ -1553,125 +1527,6 @@ export default function SuperAdminDashboard({
                   placeholder="Ex: (85) 99286-2177"
                   className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl py-2.5 px-3.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 />
-              </div>
-
-              {/* Row 6: Horário de Atendimento da Empresa */}
-              <div className="bg-slate-950/70 border border-slate-800/80 rounded-2xl p-4 sm:p-5 space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/70 pb-3">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center">
-                      <Clock className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-bold text-slate-200 uppercase tracking-wider">
-                        Horário de Atendimento da Loja
-                      </h4>
-                      <p className="text-[11px] text-slate-400">
-                        Exibe aos clientes se a loja está aberta ou fora do expediente
-                      </p>
-                    </div>
-                  </div>
-
-                  <label className="relative inline-flex items-center cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={formHoursEnabled}
-                      onChange={(e) => setFormHoursEnabled(e.target.checked)}
-                      className="sr-only peer"
-                    />
-                    <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
-                    <span className="ml-2.5 text-xs font-bold text-slate-300">
-                      {formHoursEnabled ? '🟢 Ativado' : '⚪ Livre (24 Horas)'}
-                    </span>
-                  </label>
-                </div>
-
-                {formHoursEnabled && (
-                  <div className="space-y-4 pt-1 animate-fadeIn">
-                    {/* Days selector */}
-                    <div className="space-y-1.5">
-                      <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
-                        Dias da Semana com Expediente
-                      </label>
-                      <div className="flex flex-wrap gap-1.5">
-                        {[
-                          { id: 1, label: 'Seg' },
-                          { id: 2, label: 'Ter' },
-                          { id: 3, label: 'Qua' },
-                          { id: 4, label: 'Qui' },
-                          { id: 5, label: 'Sex' },
-                          { id: 6, label: 'Sáb' },
-                          { id: 0, label: 'Dom' },
-                        ].map((d) => {
-                          const isSelected = formHoursDays.includes(d.id);
-                          return (
-                            <button
-                              key={d.id}
-                              type="button"
-                              onClick={() => {
-                                if (isSelected) {
-                                  if (formHoursDays.length > 1) {
-                                    setFormHoursDays(formHoursDays.filter((x) => x !== d.id));
-                                  }
-                                } else {
-                                  setFormHoursDays([...formHoursDays, d.id]);
-                                }
-                              }}
-                              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                                isSelected
-                                  ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-950/30'
-                                  : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200'
-                              }`}
-                            >
-                              {d.label}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* Time Inputs */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
-                          Horário de Abertura
-                        </label>
-                        <input
-                          type="time"
-                          value={formHoursStart}
-                          onChange={(e) => setFormHoursStart(e.target.value)}
-                          className="w-full bg-slate-900 border border-slate-800 text-white rounded-xl py-2 px-3 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 font-semibold"
-                        />
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
-                          Horário de Fechamento
-                        </label>
-                        <input
-                          type="time"
-                          value={formHoursEnd}
-                          onChange={(e) => setFormHoursEnd(e.target.value)}
-                          className="w-full bg-slate-900 border border-slate-800 text-white rounded-xl py-2 px-3 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 font-semibold"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Offline Message */}
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
-                        Mensagem para Clientes Fora do Expediente
-                      </label>
-                      <textarea
-                        rows={2}
-                        value={formHoursOfflineMsg}
-                        onChange={(e) => setFormHoursOfflineMsg(e.target.value)}
-                        placeholder="Ex: No momento estamos fora do nosso expediente. Deixe sua mensagem e contato que responderemos assim que retornarmos!"
-                        className="w-full bg-slate-900 border border-slate-800 text-white rounded-xl p-3 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-slate-500 resize-none leading-relaxed"
-                      />
-                    </div>
-                  </div>
-                )}
               </div>
 
               </div>

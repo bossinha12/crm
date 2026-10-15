@@ -23,14 +23,6 @@ export interface CompanyLicense {
   lastPaymentDate?: string;
 }
 
-export interface OperatingHours {
-  enabled?: boolean;
-  days?: number[]; // [1, 2, 3, 4, 5] (1=Monday, 2=Tuesday, ..., 6=Saturday, 0=Sunday)
-  startHour?: string; // e.g. "08:00"
-  endHour?: string; // e.g. "18:00"
-  offlineMessage?: string;
-}
-
 export interface Company {
   id: string;
   name: string;
@@ -42,7 +34,6 @@ export interface Company {
   maxSellers?: number;
   createdAt: string;
   license?: CompanyLicense;
-  operatingHours?: OperatingHours;
 }
 
 export interface User {
