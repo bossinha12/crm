@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { doc, getDoc, setDoc, onSnapshot, collection } from 'firebase/firestore';
 import { db, auth, testFirestoreConnection } from './lib/firebase';
 import { signInAnonymously } from 'firebase/auth';
@@ -61,31 +61,48 @@ export default function App() {
            hash.includes('superadmin');
   });
 
-  const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    // Check if the URL requests a specific login view (vendedor, gerente, dono, login)
-    const params = new URLSearchParams(window.location.search);
-    const viewParam = (params.get('view') || '').toLowerCase();
-    const roleParam = (params.get('role') || params.get('tipo') || '').toLowerCase();
-    const isLoginRequested = viewParam === 'login' || 
-                             viewParam === 'vendedor' || 
-                             viewParam === 'gerente' || 
-                             viewParam === 'dono' || 
-                             viewParam === 'owner' || 
-                             viewParam === 'seller' ||
-                             roleParam === 'gerente' || 
-                             roleParam === 'dono' || 
-                             roleParam === 'admin' ||
-                             params.get('login') === 'true' || 
-                             params.get('logout') === 'true';
+  // Helper to match company against target slug or ID accurately
+  const matchesCompany = (c: Company | null | undefined, target: string): boolean => {
+    if (!c || !target) return false;
+    const t = target.toLowerCase().trim();
+    const idLower = (c.id || '').toLowerCase();
+    const slugLower = (c.slug || '').toLowerCase();
+    return (
+      idLower === t ||
+      slugLower === t ||
+      idLower === `company_${t}` ||
+      `company_${slugLower}` === t ||
+      idLower.replace(/^company_/, '') === t.replace(/^company_/, '') ||
+      (t === 'atendepro_default' && idLower === 'atendepro_default') ||
+      (t === 'larissamoveis' && (idLower === 'atendepro_default' || slugLower === 'larissamoveis'))
+    );
+  };
 
+  const previousCompanyParamRef = useRef(getCompanyIdentifierFromUrl().toLowerCase());
+
+  const [currentUser, setCurrentUser] = useState<User | null>(() => {
     // Clear leaking global sessions from older versions
     try {
       localStorage.removeItem('crm_current_user');
       localStorage.removeItem('crm_current_user_atendepro');
     } catch (e) {}
 
-    // When clicking a link that targets commercial / login areas, prompt for credentials!
-    if (isLoginRequested) {
+    const params = new URLSearchParams(window.location.search);
+    const viewParam = params.get('view');
+    const roleParam = (params.get('role') || params.get('tipo') || '').toLowerCase();
+    const isLoginLink = 
+      viewParam === 'vendedor' || 
+      viewParam === 'seller' || 
+      viewParam === 'login' || 
+      viewParam === 'gerente' || 
+      viewParam === 'dono' || 
+      viewParam === 'owner' || 
+      roleParam === 'gerente' || 
+      roleParam === 'dono' || 
+      roleParam === 'admin';
+
+    // If entering directly through a login link, always present login screen (no auto-resume)
+    if (isLoginLink && params.get('autologin') !== 'true') {
       return null;
     }
 
@@ -113,7 +130,6 @@ export default function App() {
   // Watch for session changes to persist/remove from localStorage strictly for this company
   useEffect(() => {
     const rawTarget = getCompanyIdentifierFromUrl().toLowerCase();
-    // Always clear generic global keys to prevent session contamination across companies
     try {
       localStorage.removeItem('crm_current_user');
       localStorage.removeItem('crm_current_user_atendepro');
@@ -165,7 +181,7 @@ export default function App() {
       return 'gerente';
     }
     if (viewParam === 'vendedor' || viewParam === 'seller' || viewParam === 'login') {
-      return 'vendedor';
+      return customComp ? 'vendedor' : 'master_login';
     }
     if (viewParam === 'portal') return 'home';
     if (!customComp) return 'master_login';
@@ -173,7 +189,29 @@ export default function App() {
   });
   const [connecting, setConnecting] = useState(true);
 
-  // Parse direct access via URL Query Parameters and Hash Navigation
+  // Synchronous navigation helper to keep URL and currentView in sync
+  const navigate = (
+    paramsToSet: Record<string, string | null>, 
+    targetView?: 'home' | 'client' | 'vendedor' | 'gerente' | 'master_login'
+  ) => {
+    const params = new URLSearchParams(window.location.search);
+    Object.entries(paramsToSet).forEach(([k, v]) => {
+      if (v === null) {
+        params.delete(k);
+      } else {
+        params.set(k, v);
+      }
+    });
+    const newSearch = params.toString() ? `?${params.toString()}` : '';
+    const newUrl = `${window.location.pathname}${newSearch}${window.location.hash}`;
+    window.history.pushState({}, '', newUrl);
+
+    if (targetView) {
+      setCurrentView(targetView);
+    }
+  };
+
+  // Parse direct access via URL Query Parameters and Hash Navigation (popstate / hashchange)
   useEffect(() => {
     const handleUrlChange = () => {
       const params = new URLSearchParams(window.location.search);
@@ -191,51 +229,45 @@ export default function App() {
                             params.get('c') || 
                             params.get('slug');
 
-      const activeCompId = customCompany ? customCompany.trim() : 'atendepro_default';
-      if (customCompany && customCompany.trim() !== companyId) {
-        setCompanyId(customCompany.trim());
-        // Company changed in the URL! Clear currentUser so another company's session is NEVER reused!
-        setCurrentUser(null);
-      } else if (!customCompany && companyId !== 'atendepro_default') {
-        setCompanyId('atendepro_default');
-        setCurrentUser(null);
-      }
+      const targetIdentifier = (customCompany ? customCompany.trim() : 'atendepro_default').toLowerCase();
 
-      // If user navigated to login/vendedor/gerente, reset currentUser so login is explicitly requested!
-      if (viewParam === 'gerente' || viewParam === 'dono' || viewParam === 'owner' || viewParam === 'vendedor' || viewParam === 'seller' || viewParam === 'login' || roleParam === 'gerente' || roleParam === 'dono' || roleParam === 'admin') {
-        if (params.get('autologin') !== 'true') {
-          setCurrentUser(null);
+      // Only reset currentUser if the company parameter in the URL ACTUALLY changed
+      if (previousCompanyParamRef.current !== targetIdentifier) {
+        previousCompanyParamRef.current = targetIdentifier;
+        setCurrentUser(null);
+
+        const matched = allCompaniesList.find(c => matchesCompany(c, targetIdentifier));
+        if (matched) {
+          setCompany(matched);
+          setCompanyId(matched.id);
+        } else {
+          setCompanyId(targetIdentifier);
         }
       }
 
       if (isSuper) {
         setIsSuperAdminView(true);
         document.title = 'Painel de Licenças | Gestão de Empresas';
-      } else if (viewParam === 'gerente' || viewParam === 'dono' || viewParam === 'owner' || roleParam === 'gerente' || roleParam === 'dono' || roleParam === 'admin') {
-        setIsSuperAdminView(false);
-        setCurrentView('gerente');
-      } else if (viewParam === 'vendedor' || viewParam === 'seller' || viewParam === 'login' || hash.includes('login') || hash.includes('vendedor')) {
-        setIsSuperAdminView(false);
-        setCurrentView(activeCompId === 'atendepro_default' ? 'master_login' : 'vendedor');
-      } else if (viewParam === 'portal' || hash.includes('portal')) {
-        setIsSuperAdminView(false);
-        setCurrentView('home');
-      } else if (viewParam === 'client' || hash.includes('client')) {
-        setIsSuperAdminView(false);
-        setCurrentView('client');
       } else {
         setIsSuperAdminView(false);
-        // If on default root without specific client, show Master Login directly
-        if (!customCompany || activeCompId === 'atendepro_default') {
-          setCurrentView('master_login');
-        } else {
-          // If custom company link (e.g. ?empresa=loja), show client chat form
+        if (viewParam === 'gerente' || viewParam === 'dono' || viewParam === 'owner' || roleParam === 'gerente' || roleParam === 'dono' || roleParam === 'admin') {
+          setCurrentView('gerente');
+        } else if (viewParam === 'vendedor' || viewParam === 'seller' || viewParam === 'login' || hash.includes('login') || hash.includes('vendedor')) {
+          setCurrentView(targetIdentifier === 'atendepro_default' ? 'master_login' : 'vendedor');
+        } else if (viewParam === 'portal' || hash.includes('portal')) {
+          setCurrentView('home');
+        } else if (viewParam === 'client' || hash.includes('client')) {
           setCurrentView('client');
+        } else {
+          if (!customCompany || targetIdentifier === 'atendepro_default') {
+            setCurrentView('master_login');
+          } else {
+            setCurrentView('client');
+          }
         }
       }
     };
 
-    handleUrlChange();
     window.addEventListener('popstate', handleUrlChange);
     window.addEventListener('hashchange', handleUrlChange);
 
@@ -243,7 +275,7 @@ export default function App() {
       window.removeEventListener('popstate', handleUrlChange);
       window.removeEventListener('hashchange', handleUrlChange);
     };
-  }, [companyId]);
+  }, [allCompaniesList]);
 
   // Dynamically update document title, favicon, and PWA Web Manifest based on active company
   useEffect(() => {
@@ -282,16 +314,7 @@ export default function App() {
           const targetParam = getCompanyIdentifierFromUrl().toLowerCase();
           
           // Match company by slug, exact ID, or company_{slug}
-          let matched = fetchedCompanies.find(c => {
-            const idLower = (c.id || '').toLowerCase();
-            const slugLower = (c.slug || '').toLowerCase();
-            return slugLower === targetParam ||
-                   idLower === targetParam ||
-                   idLower === `company_${targetParam}` ||
-                   `company_${slugLower}` === targetParam ||
-                   (targetParam === 'larissamoveis' && (idLower === 'atendepro_default' || slugLower === 'larissamoveis')) ||
-                   (targetParam === 'atendepro_default' && idLower === 'atendepro_default');
-          });
+          let matched = fetchedCompanies.find(c => matchesCompany(c, targetParam));
 
           // Check fallback in localStorage
           if (!matched) {
@@ -299,14 +322,7 @@ export default function App() {
             if (savedLocal) {
               try {
                 const parsed = JSON.parse(savedLocal) as Company[];
-                matched = parsed.find(c => {
-                  const idLower = (c.id || '').toLowerCase();
-                  const slugLower = (c.slug || '').toLowerCase();
-                  return slugLower === targetParam ||
-                         idLower === targetParam ||
-                         idLower === `company_${targetParam}` ||
-                         `company_${slugLower}` === targetParam;
-                });
+                matched = parsed.find(c => matchesCompany(c, targetParam));
               } catch (e) {}
             }
           }
@@ -381,14 +397,7 @@ export default function App() {
           if (savedLocal) {
             try {
               const parsed = JSON.parse(savedLocal) as Company[];
-              matched = parsed.find(c => {
-                const idLower = (c.id || '').toLowerCase();
-                const slugLower = (c.slug || '').toLowerCase();
-                return slugLower === targetParam ||
-                       idLower === targetParam ||
-                       idLower === `company_${targetParam}` ||
-                       `company_${slugLower}` === targetParam;
-              });
+              matched = parsed.find(c => matchesCompany(c, targetParam));
             } catch (e) {}
           }
 
@@ -398,14 +407,14 @@ export default function App() {
           } else if (targetParam === 'atendepro_default' || targetParam === 'larissamoveis') {
             setCompany({
               id: 'atendepro_default',
-              name: 'Larissa Móveis',
-              slug: 'larissamoveis',
-              logoUrl: 'https://i.postimg.cc/8CdttXNK/Whats-App-Image-2026-06-10-at-14-30-14.jpg',
-              adminName: 'Larissa',
-              adminPassword: '13259898',
+              name: 'Atendimento Online',
+              slug: 'atendimento',
+              logoUrl: '',
+              adminName: 'Administrador',
+              adminPassword: 'admin',
               license: {
                 status: 'active',
-                planName: 'Plano Pro Vitalício',
+                planName: 'Plano Pro Master',
                 monthlyPrice: 0,
                 isLifetime: true
               },
@@ -444,7 +453,7 @@ export default function App() {
     return () => {
       if (unsubscribeCompanies) unsubscribeCompanies();
     };
-  }, [companyId]);
+  }, []);
 
   if (connecting) {
     return (
@@ -542,14 +551,20 @@ export default function App() {
               companyId={companyId} 
               company={company}
               adminUser={currentUser} 
-              onLogout={() => setCurrentUser(null)} 
+              onLogout={() => {
+                setCurrentUser(null);
+                navigate({ view: 'gerente' }, companyId === 'atendepro_default' ? 'master_login' : 'gerente');
+              }} 
             />
           ) : (
             <SellerDashboard 
               companyId={companyId} 
               company={company}
               sellerUser={currentUser} 
-              onLogout={() => setCurrentUser(null)} 
+              onLogout={() => {
+                setCurrentUser(null);
+                navigate({ view: 'vendedor' }, companyId === 'atendepro_default' ? 'master_login' : 'vendedor');
+              }} 
               onUpdateUser={(updated) => setCurrentUser(updated)}
             />
           )}
@@ -561,15 +576,36 @@ export default function App() {
   // 4. Render Master Panel Login (Simple Login + Password for Master Administration)
   if (currentView === 'master_login') {
     return (
-      <MasterLoginScreen
-        companyId={companyId}
-        company={company}
-        onLoginSuccess={(user) => setCurrentUser(user)}
-        onOpenSuperAdmin={() => {
-          window.history.pushState({}, '', '?view=superadmin');
-          setIsSuperAdminView(true);
-        }}
-      />
+      <main className="min-h-screen bg-slate-100 flex flex-col justify-center items-center p-4 font-sans leading-relaxed relative">
+        <MasterLoginScreen
+          companyId={companyId}
+          company={company}
+          onLoginSuccess={(user) => setCurrentUser(user)}
+          onOpenSuperAdmin={() => {
+            window.history.pushState({}, '', '?view=superadmin');
+            setIsSuperAdminView(true);
+          }}
+        />
+
+        <div className="mt-4 flex flex-wrap items-center justify-center gap-3 text-center">
+          <button
+            onClick={() => navigate({ view: 'client' }, 'client')}
+            className="text-xs text-slate-500 hover:text-indigo-600 transition-colors font-medium cursor-pointer flex items-center gap-1.5 bg-white/80 hover:bg-white px-3 py-1.5 rounded-full border border-slate-200/80 shadow-sm"
+          >
+            <Headphones className="w-3.5 h-3.5 text-indigo-600" />
+            <span>Chat do Cliente</span>
+          </button>
+          <button
+            onClick={() => {
+              window.history.pushState({}, '', '?view=superadmin');
+              setIsSuperAdminView(true);
+            }}
+            className="text-[11px] text-slate-400 hover:text-slate-600 transition-colors font-medium cursor-pointer"
+          >
+            🔒 Gerenciador de Licenças
+          </button>
+        </div>
+      </main>
     );
   }
 
@@ -586,15 +622,22 @@ export default function App() {
           companyLogo={currentCompanyLogo}
           company={company}
           onGoBack={hasPortalAccess ? () => {
-            const newParams = new URLSearchParams(window.location.search);
-            newParams.set('view', 'portal');
-            window.history.pushState({}, '', `?${newParams.toString()}`);
-            setCurrentView('home');
+            navigate({ view: 'portal' }, 'home');
           } : undefined} 
         />
 
-        {/* Discreet Super Admin link at bottom */}
-        <div className="mt-4 text-center">
+        {/* Discreet Super Admin & Seller Login links at bottom */}
+        <div className="mt-4 flex flex-wrap items-center justify-center gap-3 text-center">
+          <button
+            onClick={() => {
+              navigate({ view: 'vendedor' }, companyId === 'atendepro_default' ? 'master_login' : 'vendedor');
+            }}
+            className="text-xs text-slate-500 hover:text-indigo-600 transition-colors font-semibold cursor-pointer flex items-center gap-1.5 bg-white/90 hover:bg-white px-3.5 py-1.5 rounded-full border border-slate-200/90 shadow-sm"
+          >
+            <LogIn className="w-3.5 h-3.5 text-indigo-600" />
+            <span>Área Comercial (Vendedor / Dono)</span>
+          </button>
+
           <button
             onClick={() => {
               window.history.pushState({}, '', '?view=superadmin');
@@ -602,7 +645,7 @@ export default function App() {
             }}
             className="text-[11px] text-slate-400 hover:text-slate-600 transition-colors font-medium cursor-pointer"
           >
-            🔒 Gerenciador de Licenças (Super Admin)
+            🔒 Gerenciador de Licenças
           </button>
         </div>
       </main>
@@ -610,7 +653,7 @@ export default function App() {
   }
 
   // 6. Render Dedicated Seller Login (Name only + Device Lock)
-  if (currentView === 'vendedor') {
+  if (currentView === 'vendedor' || (currentView as string) === 'login') {
     return (
       <main className="min-h-screen bg-slate-100 flex flex-col justify-center items-center p-4 font-sans leading-relaxed relative">
         <SellerLoginScreen
@@ -618,14 +661,19 @@ export default function App() {
           company={company}
           onLoginSuccess={(user) => setCurrentUser(user)}
           onSwitchToOwnerLogin={() => {
-            const newParams = new URLSearchParams(window.location.search);
-            newParams.set('view', 'gerente');
-            window.history.pushState({}, '', `?${newParams.toString()}`);
-            setCurrentView('gerente');
+            navigate({ view: 'gerente' }, 'gerente');
           }}
         />
 
-        <div className="mt-4 text-center">
+        <div className="mt-4 flex flex-wrap items-center justify-center gap-3 text-center">
+          <button
+            onClick={() => navigate({ view: 'client' }, 'client')}
+            className="text-xs text-slate-500 hover:text-indigo-600 transition-colors font-medium cursor-pointer flex items-center gap-1.5 bg-white/80 hover:bg-white px-3 py-1.5 rounded-full border border-slate-200/80 shadow-sm"
+          >
+            <Headphones className="w-3.5 h-3.5 text-indigo-600" />
+            <span>Ir para Chat do Cliente</span>
+          </button>
+
           <button
             onClick={() => {
               window.history.pushState({}, '', '?view=superadmin');
@@ -649,14 +697,19 @@ export default function App() {
           company={company}
           onLoginSuccess={(user) => setCurrentUser(user)}
           onSwitchToSellerLogin={() => {
-            const newParams = new URLSearchParams(window.location.search);
-            newParams.set('view', 'vendedor');
-            window.history.pushState({}, '', `?${newParams.toString()}`);
-            setCurrentView('vendedor');
+            navigate({ view: 'vendedor' }, 'vendedor');
           }}
         />
 
-        <div className="mt-4 text-center">
+        <div className="mt-4 flex flex-wrap items-center justify-center gap-3 text-center">
+          <button
+            onClick={() => navigate({ view: 'client' }, 'client')}
+            className="text-xs text-slate-500 hover:text-indigo-600 transition-colors font-medium cursor-pointer flex items-center gap-1.5 bg-white/80 hover:bg-white px-3 py-1.5 rounded-full border border-slate-200/80 shadow-sm"
+          >
+            <Headphones className="w-3.5 h-3.5 text-indigo-600" />
+            <span>Ir para Chat do Cliente</span>
+          </button>
+
           <button
             onClick={() => {
               window.history.pushState({}, '', '?view=superadmin');
@@ -671,7 +724,7 @@ export default function App() {
     );
   }
 
-  // 6. Render Dual selection portal landing page
+  // 8. Render Dual selection portal landing page
   return (
     <main className="min-h-screen bg-slate-50 flex flex-col p-4 sm:p-6 lg:p-8 font-sans items-center justify-center relative overflow-hidden">
       
@@ -705,11 +758,7 @@ export default function App() {
           {/* Card 1: Customer Entrance point */}
           <button
             onClick={() => {
-              const newParams = new URLSearchParams(window.location.search);
-              newParams.set('view', 'client');
-              newParams.set('portal', 'true');
-              window.history.pushState({}, '', `?${newParams.toString()}`);
-              setCurrentView('client');
+              navigate({ view: 'client', portal: 'true' }, 'client');
             }}
             className="text-left group relative bg-white border border-slate-200 hover:border-indigo-500 rounded-3xl p-6 shadow-xl shadow-slate-100 transition-all hover:-translate-y-1 block duration-300 cursor-pointer"
           >
@@ -731,11 +780,7 @@ export default function App() {
           {/* Card 2: Company Employee Area entrance point */}
           <button
             onClick={() => {
-              const newParams = new URLSearchParams(window.location.search);
-              newParams.set('view', 'login');
-              newParams.set('portal', 'true');
-              window.history.pushState({}, '', `?${newParams.toString()}`);
-              setCurrentView('login');
+              navigate({ view: 'vendedor', portal: 'true' }, companyId === 'atendepro_default' ? 'master_login' : 'vendedor');
             }}
             className="text-left group relative bg-white border border-slate-200 hover:border-indigo-500 rounded-3xl p-6 shadow-xl shadow-slate-100 transition-all hover:-translate-y-1 block duration-300 cursor-pointer"
           >
