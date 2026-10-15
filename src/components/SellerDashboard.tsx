@@ -11,6 +11,7 @@ import {
   Upload, CheckCircle, BellRing, PhoneCall, Clock
 } from 'lucide-react';
 import { formatMessageDateTime } from '../lib/formatters';
+import { sendPwaPushNotification } from '../lib/notifications';
 import InternalTeamChat from './InternalTeamChat';
 
 interface SellerDashboardProps {

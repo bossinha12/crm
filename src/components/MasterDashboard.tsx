@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { collection, onSnapshot, query, orderBy, doc, setDoc, deleteDoc, getDocs } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, sanitizeFirestoreData } from '../lib/firebase';
-import { User, Chat, Message, ChatStatus, Company, Lead } from '../types';
+import { User, Chat, Message, ChatStatus, Company, Lead, OperatingHours } from '../types';
 import { 
   BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer 
 } from 'recharts';
@@ -43,13 +43,65 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
   const [mirroredMessages, setMirroredMessages] = useState<Message[]>([]);
   const mirrorFeedContainerRef = useRef<HTMLDivElement>(null);
 
-  // Active Menu Tabs: 'analytics' | 'sellers' | 'live-feeds' | 'leads' | 'internal-chat'
-  const [activeTab, setActiveTab] = useState<'analytics' | 'sellers' | 'live-feeds' | 'leads' | 'internal-chat'>('analytics');
+  // Active Menu Tabs: 'analytics' | 'sellers' | 'live-feeds' | 'leads' | 'internal-chat' | 'operating-hours'
+  const [activeTab, setActiveTab] = useState<'analytics' | 'sellers' | 'live-feeds' | 'leads' | 'internal-chat' | 'operating-hours'>('analytics');
   const [selectedSellerForDirectChat, setSelectedSellerForDirectChat] = useState<string | null>(null);
   const [unreadInternalCount, setUnreadInternalCount] = useState<number>(0);
   const [isClearing, setIsClearing] = useState(false);
   const [oldAndClosedChats, setOldAndClosedChats] = useState<Chat[]>([]);
   const [showClosedChats, setShowClosedChats] = useState(false);
+
+  // Operating Hours State for Store Admin
+  const [opHoursEnabled, setOpHoursEnabled] = useState(liveCompany?.operatingHours?.enabled || false);
+  const [opHoursDays, setOpHoursDays] = useState<number[]>(liveCompany?.operatingHours?.days || [1, 2, 3, 4, 5]);
+  const [opHoursStart, setOpHoursStart] = useState(liveCompany?.operatingHours?.startHour || '08:00');
+  const [opHoursEnd, setOpHoursEnd] = useState(liveCompany?.operatingHours?.endHour || '18:00');
+  const [opHoursOfflineMsg, setOpHoursOfflineMsg] = useState(liveCompany?.operatingHours?.offlineMessage || 'No momento estamos fora do nosso expediente. Deixe sua mensagem e contato que atenderemos você assim que abrirmos!');
+  const [opHoursSaving, setOpHoursSaving] = useState(false);
+  const [opHoursSavedSuccess, setOpHoursSavedSuccess] = useState(false);
+
+  // Synchronize Operating Hours when liveCompany updates
+  useEffect(() => {
+    if (liveCompany?.operatingHours) {
+      setOpHoursEnabled(liveCompany.operatingHours.enabled || false);
+      setOpHoursDays(liveCompany.operatingHours.days && liveCompany.operatingHours.days.length > 0 ? liveCompany.operatingHours.days : [1, 2, 3, 4, 5]);
+      setOpHoursStart(liveCompany.operatingHours.startHour || '08:00');
+      setOpHoursEnd(liveCompany.operatingHours.endHour || '18:00');
+      if (liveCompany.operatingHours.offlineMessage) {
+        setOpHoursOfflineMsg(liveCompany.operatingHours.offlineMessage);
+      }
+    }
+  }, [liveCompany?.operatingHours]);
+
+  // Save Operating Hours handler
+  const handleSaveOperatingHours = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setOpHoursSaving(true);
+    const newOperatingHours: OperatingHours = {
+      enabled: opHoursEnabled,
+      days: opHoursDays,
+      startHour: opHoursStart || '08:00',
+      endHour: opHoursEnd || '18:00',
+      offlineMessage: opHoursOfflineMsg.trim()
+    };
+
+    const activeCompId = liveCompany?.id || companyId;
+    const altCompId = liveCompany?.slug || companyId.replace(/^company_/, '');
+    const idsToUpdate = Array.from(new Set([activeCompId, altCompId, companyId])).filter(Boolean);
+
+    for (const cId of idsToUpdate) {
+      try {
+        await setDoc(doc(db, 'companies', cId), sanitizeFirestoreData({
+          operatingHours: newOperatingHours
+        }), { merge: true });
+      } catch (e) {}
+    }
+
+    setLiveCompany(prev => prev ? { ...prev, operatingHours: newOperatingHours } : null);
+    setOpHoursSaving(false);
+    setOpHoursSavedSuccess(true);
+    setTimeout(() => setOpHoursSavedSuccess(false), 4000);
+  };
 
   // Leads & Marketing state
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -1262,6 +1314,27 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
             </span>
           )}
         </button>
+
+        <button
+          onClick={() => { setActiveTab('operating-hours'); setMirroredChatId(null); }}
+          className={`px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
+            activeTab === 'operating-hours'
+              ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100'
+              : 'text-amber-800 bg-amber-50/80 hover:bg-amber-100/80 border border-amber-200/60'
+          }`}
+        >
+          <Clock className="w-3.5 h-3.5 text-amber-600" />
+          <span>Horário de Atendimento</span>
+          {opHoursEnabled ? (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full font-extrabold bg-emerald-600 text-white">
+              Ativo
+            </span>
+          ) : (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-slate-200 text-slate-700">
+              24h
+            </span>
+          )}
+        </button>
       </div>
 
       {/* 30 Days Auto purging / cleaner helper banner */}
@@ -2052,6 +2125,166 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
               company={company}
               targetSellerId={selectedSellerForDirectChat}
             />
+          </div>
+        )}
+
+        {/* Tab 6: Store Operating Hours Management */}
+        {activeTab === 'operating-hours' && (
+          <div className="bg-white border border-slate-100 rounded-3xl p-6 sm:p-8 shadow-xl max-w-3xl space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0 border border-amber-100">
+                  <Clock className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-extrabold text-slate-800">
+                    Horário de Atendimento da Loja
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Configure os dias e horas em que sua equipe atende os clientes.
+                  </p>
+                </div>
+              </div>
+
+              <label className="relative inline-flex items-center cursor-pointer select-none self-start sm:self-auto">
+                <input
+                  type="checkbox"
+                  checked={opHoursEnabled}
+                  onChange={(e) => setOpHoursEnabled(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-12 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                <span className="ml-3 text-xs font-bold text-slate-700">
+                  {opHoursEnabled ? '🟢 Horário Ativo' : '⚪ Atendimento 24h'}
+                </span>
+              </label>
+            </div>
+
+            {opHoursSavedSuccess && (
+              <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl text-emerald-800 text-xs font-bold flex items-center gap-2 animate-fadeIn">
+                <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>Configurações de horário salvas com sucesso! Seus clientes já verão o status atualizado em tempo real.</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveOperatingHours} className="space-y-6">
+              {opHoursEnabled ? (
+                <>
+                  {/* Dias da semana */}
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block">
+                      Dias com Atendimento Comercial
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        { id: 1, label: 'Segunda' },
+                        { id: 2, label: 'Terça' },
+                        { id: 3, label: 'Quarta' },
+                        { id: 4, label: 'Quinta' },
+                        { id: 5, label: 'Sexta' },
+                        { id: 6, label: 'Sábado' },
+                        { id: 0, label: 'Domingo' },
+                      ].map((d) => {
+                        const isSelected = opHoursDays.includes(d.id);
+                        return (
+                          <button
+                            key={d.id}
+                            type="button"
+                            onClick={() => {
+                              if (isSelected) {
+                                if (opHoursDays.length > 1) {
+                                  setOpHoursDays(opHoursDays.filter((x) => x !== d.id));
+                                }
+                              } else {
+                                setOpHoursDays([...opHoursDays, d.id]);
+                              }
+                            }}
+                            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                              isSelected
+                                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100'
+                                : 'bg-slate-50 border border-slate-200 text-slate-600 hover:bg-slate-100'
+                            }`}
+                          >
+                            {d.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Horários */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block">
+                        Horário de Início (Abertura)
+                      </label>
+                      <input
+                        type="time"
+                        value={opHoursStart}
+                        onChange={(e) => setOpHoursStart(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl py-2.5 px-3.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 font-bold"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block">
+                        Horário de Término (Fechamento)
+                      </label>
+                      <input
+                        type="time"
+                        value={opHoursEnd}
+                        onChange={(e) => setOpHoursEnd(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl py-2.5 px-3.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 font-bold"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Mensagem Fora do Horário */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block">
+                      Mensagem de Aviso aos Clientes (Fora do Expediente)
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={opHoursOfflineMsg}
+                      onChange={(e) => setOpHoursOfflineMsg(e.target.value)}
+                      placeholder="Ex: No momento estamos fora do nosso expediente. Deixe sua mensagem e contato que atenderemos você assim que abrirmos!"
+                      className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl p-3.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none leading-relaxed"
+                    />
+                    <p className="text-[11px] text-slate-400">
+                      Esta mensagem será exibida na tela do cliente quando ele acessar fora do horário configurado.
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <div className="p-5 bg-slate-50 border border-slate-200 rounded-2xl text-slate-600 text-xs flex items-center gap-3">
+                  <Sparkles className="w-5 h-5 text-indigo-500 shrink-0" />
+                  <p className="leading-relaxed">
+                    <strong>Atendimento Livre (24 Horas):</strong> Sua loja está configurada para receber clientes 24 horas por dia, 7 dias por semana, sem avisos de fechamento. Para definir um horário específico, ative o botão acima.
+                  </p>
+                </div>
+              )}
+
+              <div className="flex justify-end pt-2">
+                <button
+                  type="submit"
+                  disabled={opHoursSaving}
+                  className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-indigo-100 flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  {opHoursSaving ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Salvando Horários...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle className="w-4 h-4" />
+                      <span>Salvar Horários de Atendimento</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
         )}
 

@@ -1,6 +1,7 @@
 class CRMAlarm {
   private audioCtx: AudioContext | null = null;
   private intervalId: any = null;
+  private vibrateIntervalId: any = null;
   private isPlaying = false;
   private isMuted = false;
   private isUnlocked = false;
@@ -218,18 +219,102 @@ class CRMAlarm {
     } catch (err) {
       console.error("Could not trigger call sound synthesis:", err);
     }
+
+    // Trigger recurring phone vibration on mobile like a real phone call
+    const triggerPhoneVibrate = () => {
+      try {
+        if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+          navigator.vibrate([400, 200, 400, 200, 600]);
+        }
+      } catch (e) {}
+    };
+    triggerPhoneVibrate();
+    if (this.vibrateIntervalId) clearInterval(this.vibrateIntervalId);
+    this.vibrateIntervalId = setInterval(triggerPhoneVibrate, 1900);
   }
 
   /**
-   * Instantly terminates all audio loops and stops the alarm.
+   * Explicitly unlocks audio and resumes context upon user touch
+   */
+  public unlock() {
+    try {
+      const ctx = this.ensureContext();
+      if (ctx && ctx.state === 'suspended') {
+        ctx.resume().catch(() => {});
+      }
+      this.isUnlocked = true;
+    } catch (e) {}
+  }
+
+  public getIsUnlocked() {
+    return this.isUnlocked && (!this.audioCtx || this.audioCtx.state === 'running');
+  }
+
+  /**
+   * Instantly terminates all audio loops, vibrations, and stops the alarm.
    */
   public stop() {
-    if (!this.isPlaying && !this.intervalId) return;
+    if (!this.isPlaying && !this.intervalId && !this.vibrateIntervalId) return;
     this.isPlaying = false;
 
     if (this.intervalId) {
       clearInterval(this.intervalId);
       this.intervalId = null;
+    }
+
+    if (this.vibrateIntervalId) {
+      clearInterval(this.vibrateIntervalId);
+      this.vibrateIntervalId = null;
+    }
+
+    try {
+      if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+        navigator.vibrate(0);
+      }
+    } catch (e) {}
+  }
+
+  /**
+   * Pleasant short chime for incoming client message notifications
+   */
+  public playMessageNotification() {
+    if (this.isMuted) return;
+    try {
+      const currentCtx = this.ensureContext();
+      if (!currentCtx) return;
+      if (currentCtx.state === 'suspended') {
+        currentCtx.resume();
+      }
+      const t = currentCtx.currentTime;
+
+      // Note 1 (E5 - 659.25Hz)
+      const osc1 = currentCtx.createOscillator();
+      const gain1 = currentCtx.createGain();
+      osc1.type = 'sine';
+      osc1.frequency.setValueAtTime(659.25, t);
+      osc1.frequency.exponentialRampToValueAtTime(783.99, t + 0.1); // Slide to G5
+      gain1.gain.setValueAtTime(0.01, t);
+      gain1.gain.linearRampToValueAtTime(0.25, t + 0.03);
+      gain1.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
+      osc1.connect(gain1);
+      gain1.connect(currentCtx.destination);
+      osc1.start(t);
+      osc1.stop(t + 0.30);
+
+      // Note 2 (B5 - 987.77Hz, high crisp chime)
+      const osc2 = currentCtx.createOscillator();
+      const gain2 = currentCtx.createGain();
+      osc2.type = 'sine';
+      osc2.frequency.setValueAtTime(987.77, t + 0.12);
+      gain2.gain.setValueAtTime(0.01, t + 0.12);
+      gain2.gain.linearRampToValueAtTime(0.3, t + 0.15);
+      gain2.gain.exponentialRampToValueAtTime(0.001, t + 0.55);
+      osc2.connect(gain2);
+      gain2.connect(currentCtx.destination);
+      osc2.start(t + 0.12);
+      osc2.stop(t + 0.58);
+    } catch (e) {
+      console.warn("Message chime error:", e);
     }
   }
 }

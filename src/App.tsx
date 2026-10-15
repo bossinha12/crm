@@ -558,6 +558,7 @@ export default function App() {
           companyId={companyId} 
           companyName={currentCompanyName} 
           companyLogo={currentCompanyLogo}
+          company={company}
           onGoBack={hasPortalAccess ? () => {
             const newParams = new URLSearchParams(window.location.search);
             newParams.set('view', 'portal');
