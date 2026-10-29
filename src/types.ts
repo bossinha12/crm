@@ -85,6 +85,8 @@ export interface Message {
   senderAvatar?: string | null;
   text: string;
   imageUrl?: string;
+  audioUrl?: string;
+  audioDuration?: number; // duration in seconds
   createdAt: string;
 }
 
@@ -99,6 +101,8 @@ export interface InternalMessage {
   recipientName?: string;
   text: string;
   imageUrl?: string;
+  audioUrl?: string;
+  audioDuration?: number; // duration in seconds
   readBy?: string[]; // Array of user IDs who have seen this message
   createdAt: string;
 }

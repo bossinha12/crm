@@ -6,8 +6,11 @@ import { User, InternalMessage, Company } from '../types';
 import { 
   Send, MessageSquare, Megaphone, User as UserIcon, CheckCheck, 
   Camera, Loader2, ExternalLink, X, Image as ImageIcon, ShieldCheck, 
-  Sparkles, Check, Clock, WifiOff, Trash2
+  Sparkles, Check, Clock, WifiOff, Trash2, Mic, Square, Music
 } from 'lucide-react';
+import AudioMessagePlayer from './AudioMessagePlayer';
+import { useAudioRecorder } from '../lib/useAudioRecorder';
+import { uploadAudio } from '../lib/audioUpload';
 import { formatMessageDateTime } from '../lib/formatters';
 
 interface InternalTeamChatProps {
@@ -67,6 +70,9 @@ export default function InternalTeamChat({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatScrollContainerRef = useRef<HTMLDivElement>(null);
   const markedAsReadIdsRef = useRef<Set<string>>(new Set());
+  const audioRecorder = useAudioRecorder();
+  const [isUploadingAudio, setIsUploadingAudio] = useState(false);
+  const audioFileInputRef = useRef<HTMLInputElement>(null);
 
   // Sync targetSellerId when prop changes
   useEffect(() => {
@@ -451,6 +457,125 @@ export default function InternalTeamChat({
     }
   };
 
+  const sendInternalAudioMessage = async (audioBlob: Blob | File, durationSeconds: number, customLabel?: string) => {
+    setIsUploadingAudio(true);
+    setUploadError(null);
+    const messageText = customLabel || '🎤 Mensagem de Voz';
+    try {
+      const uploadRes = await uploadAudio(audioBlob);
+      const audioUrl = uploadRes.audioUrl;
+      const recipient = sellers.find(s => s.id === selectedRecipientId);
+      const recipientName = selectedRecipientId === 'all' 
+        ? 'Toda a Equipe' 
+        : (isAdmin ? (recipient?.name || 'Vendedor') : (company?.adminName || 'Diretoria / Proprietário'));
+
+      const optimisticAudioId = `local_aud_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const newMsg: InternalMessage = {
+        id: optimisticAudioId,
+        companyId: activeCompanyId,
+        senderId: currentUser.id,
+        senderName: currentUser.name || (isAdmin ? 'Diretoria' : 'Vendedor'),
+        senderAvatar: currentUser.avatarUrl || null,
+        senderRole: isAdmin ? 'admin' : 'seller',
+        recipientId: selectedRecipientId,
+        recipientName,
+        text: messageText,
+        audioUrl,
+        audioDuration: Math.round(durationSeconds),
+        readBy: [currentUser.id],
+        createdAt: new Date().toISOString()
+      };
+
+      setMessages(prev => {
+        const updated = [...prev, newMsg];
+        try {
+          localStorage.setItem(`atendepro_internal_msgs_${activeCompanyId}`, JSON.stringify(updated));
+        } catch (e) {}
+        return updated;
+      });
+
+      const audioDataToSave = sanitizeFirestoreData({
+        companyId: newMsg.companyId,
+        senderId: newMsg.senderId,
+        senderName: newMsg.senderName,
+        senderAvatar: newMsg.senderAvatar,
+        senderRole: newMsg.senderRole,
+        recipientId: newMsg.recipientId,
+        recipientName: newMsg.recipientName,
+        text: newMsg.text,
+        audioUrl: newMsg.audioUrl,
+        audioDuration: newMsg.audioDuration,
+        readBy: newMsg.readBy,
+        createdAt: newMsg.createdAt
+      });
+
+      const internalCol = collection(db, 'companies', activeCompanyId, 'internal_messages');
+      await addDoc(internalCol, audioDataToSave);
+      if (altCompanyId && altCompanyId !== activeCompanyId) {
+        addDoc(collection(db, 'companies', altCompanyId, 'internal_messages'), audioDataToSave).catch(() => {});
+      }
+    } catch (err) {
+      console.error("Erro no envio de áudio no chat interno:", err);
+      setUploadError(err instanceof Error ? err.message : 'Erro ao processar áudio.');
+      setTimeout(() => setUploadError(null), 4000);
+    } finally {
+      setIsUploadingAudio(false);
+    }
+  };
+
+  const handleFinishAndSendInternalAudio = async () => {
+    try {
+      const recording = await audioRecorder.stopRecording();
+      if (recording && recording.duration > 0.5) {
+        await sendInternalAudioMessage(recording.blob, recording.duration);
+      }
+    } catch (err) {
+      console.error('Erro ao parar gravação de áudio:', err);
+    }
+  };
+
+  const handleAudioFileInput = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const isAudioType = file.type.startsWith('audio/') || /\.(mp3|wav|ogg|m4a|aac|weba|flac|wma)$/i.test(file.name);
+    if (!isAudioType) {
+      setUploadError('Selecione um arquivo de áudio ou música válido (MP3, WAV, OGG, M4A, etc).');
+      setTimeout(() => setUploadError(null), 4000);
+      return;
+    }
+
+    if (file.size > 25 * 1024 * 1024) {
+      setUploadError('O áudio deve ter no máximo 25MB.');
+      setTimeout(() => setUploadError(null), 4000);
+      return;
+    }
+
+    let duration = 0;
+    try {
+      const objUrl = URL.createObjectURL(file);
+      const audioProbe = new Audio(objUrl);
+      await new Promise<void>((resolve) => {
+        audioProbe.onloadedmetadata = () => {
+          if (audioProbe.duration && !isNaN(audioProbe.duration) && isFinite(audioProbe.duration)) {
+            duration = Math.round(audioProbe.duration);
+          }
+          URL.revokeObjectURL(objUrl);
+          resolve();
+        };
+        audioProbe.onerror = () => {
+          URL.revokeObjectURL(objUrl);
+          resolve();
+        };
+        setTimeout(resolve, 1500);
+      });
+    } catch (e) {}
+
+    const cleanLabel = file.name ? `🎵 ${file.name}` : '🎵 Áudio (MP3)';
+    await sendInternalAudioMessage(file, duration, cleanLabel);
+    if (audioFileInputRef.current) audioFileInputRef.current.value = '';
+  };
+
   // Quick prompt templates for Admin to quickly direct sellers
   const adminQuickPrompts = [
     "🚀 Atenção equipe: Novos clientes na fila de espera!",
@@ -811,7 +936,17 @@ export default function InternalTeamChat({
                         </div>
                       )}
 
-                      {!hasImage && <p className="whitespace-pre-wrap">{m.text}</p>}
+                      {m.audioUrl && (
+                        <div className="py-1 min-w-[220px]">
+                          <AudioMessagePlayer
+                            audioUrl={m.audioUrl}
+                            duration={m.audioDuration}
+                            isMe={isMe}
+                          />
+                        </div>
+                      )}
+
+                      {!hasImage && !m.audioUrl && <p className="whitespace-pre-wrap">{m.text}</p>}
 
                       {m.createdAt && (
                         <div className={`text-[10px] text-right mt-1.5 flex items-center justify-end gap-1 font-mono ${
@@ -849,49 +984,133 @@ export default function InternalTeamChat({
 
           {/* Bottom Message Input Bar */}
           <div className="p-3 bg-white border-t border-slate-200 shrink-0">
-            <form onSubmit={handleSendMessage} className="flex items-center gap-2">
-              {/* Hidden ImgBB file input */}
-              <input
-                type="file"
-                ref={fileInputRef}
-                accept="image/*"
-                className="hidden"
-                onChange={handleImageUpload}
-                disabled={isUploading}
-              />
+            {audioRecorder.isRecording ? (
+              <div className="flex items-center gap-2 bg-rose-50 border border-rose-200 rounded-xl p-2 animate-in fade-in duration-200">
+                <div className="flex items-center gap-2 px-2 grow">
+                  <span className="w-3 h-3 rounded-full bg-rose-500 animate-ping shrink-0" />
+                  <span className="text-xs font-bold text-rose-700 font-mono">
+                    Gravando áudio: {audioRecorder.formattedTime}
+                  </span>
+                </div>
 
-              {/* Camera button for photo attachment */}
-              <button
-                type="button"
-                disabled={isUploading}
-                onClick={() => fileInputRef.current?.click()}
-                title="Anexar imagem (ImgBB)"
-                className="p-2.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-colors border border-slate-200 bg-white cursor-pointer disabled:opacity-50 shrink-0"
-              >
-                {isUploading ? (
-                  <Loader2 className="w-4 h-4 text-indigo-600 animate-spin" />
-                ) : (
-                  <Camera className="w-4 h-4" />
-                )}
-              </button>
+                <button
+                  type="button"
+                  onClick={audioRecorder.cancelRecording}
+                  className="p-2 text-slate-500 hover:text-rose-600 hover:bg-white rounded-lg transition-colors cursor-pointer"
+                  title="Cancelar gravação"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
 
-              <input
-                type="text"
-                required
-                value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
-                placeholder={isUploading ? "Enviando imagem ao ImgBB..." : "Digite sua mensagem interna..."}
-                className="grow py-2.5 px-3.5 text-xs text-slate-800 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
-              />
+                <button
+                  type="button"
+                  onClick={handleFinishAndSendInternalAudio}
+                  disabled={isUploadingAudio}
+                  className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors shadow-sm cursor-pointer disabled:opacity-50"
+                  title="Enviar áudio"
+                >
+                  {isUploadingAudio ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <>
+                      <Send className="w-3.5 h-3.5" />
+                      <span>Enviar</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={handleSendMessage} className="flex items-center gap-2">
+                {/* Hidden ImgBB file input */}
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleImageUpload}
+                  disabled={isUploading || isUploadingAudio}
+                />
 
-              <button
-                type="submit"
-                disabled={isUploading}
-                className="p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-md shadow-indigo-100 transition-colors flex items-center justify-center shrink-0 cursor-pointer disabled:opacity-50"
-              >
-                <Send className="w-4 h-4" />
-              </button>
-            </form>
+                {/* Hidden Audio file input */}
+                <input
+                  type="file"
+                  ref={audioFileInputRef}
+                  accept="audio/*,.mp3,.wav,.ogg,.m4a,.aac,.weba,.flac"
+                  className="hidden"
+                  onChange={handleAudioFileInput}
+                  disabled={isUploading || isUploadingAudio}
+                />
+
+                {/* Camera button for photo attachment */}
+                <button
+                  type="button"
+                  disabled={isUploading || isUploadingAudio}
+                  onClick={() => fileInputRef.current?.click()}
+                  title="Anexar imagem (ImgBB)"
+                  className="p-2.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-colors border border-slate-200 bg-white cursor-pointer disabled:opacity-50 shrink-0"
+                >
+                  {isUploading ? (
+                    <Loader2 className="w-4 h-4 text-indigo-600 animate-spin" />
+                  ) : (
+                    <Camera className="w-4 h-4" />
+                  )}
+                </button>
+
+                {/* Microphone button for voice recording */}
+                <button
+                  type="button"
+                  disabled={isUploading || isUploadingAudio}
+                  onClick={async () => {
+                    const started = await audioRecorder.startRecording();
+                    if (!started) {
+                      audioFileInputRef.current?.click();
+                    }
+                  }}
+                  title="Gravar áudio / mensagem de voz"
+                  className="p-2.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors border border-slate-200 bg-white cursor-pointer disabled:opacity-50 shrink-0"
+                >
+                  {isUploadingAudio ? (
+                    <Loader2 className="w-4 h-4 text-rose-600 animate-spin" />
+                  ) : (
+                    <Mic className="w-4 h-4 text-rose-500" />
+                  )}
+                </button>
+
+                {/* MP3 / Audio file from computer button */}
+                <button
+                  type="button"
+                  disabled={isUploading || isUploadingAudio}
+                  onClick={() => audioFileInputRef.current?.click()}
+                  title="Enviar arquivo MP3 ou Áudio do computador"
+                  className="p-2.5 text-slate-500 hover:text-purple-600 hover:bg-purple-50 rounded-xl transition-colors border border-slate-200 bg-white cursor-pointer disabled:opacity-50 shrink-0"
+                >
+                  <Music className="w-4 h-4 text-purple-600" />
+                </button>
+
+                <input
+                  type="text"
+                  required
+                  value={inputText}
+                  onChange={(e) => setInputText(e.target.value)}
+                  placeholder={
+                    isUploading 
+                      ? "Enviando imagem..." 
+                      : isUploadingAudio 
+                      ? "Processando áudio..." 
+                      : "Digite sua mensagem interna..."
+                  }
+                  className="grow py-2.5 px-3.5 text-xs text-slate-800 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                />
+
+                <button
+                  type="submit"
+                  disabled={isUploading || isUploadingAudio}
+                  className="p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-md shadow-indigo-100 transition-colors flex items-center justify-center shrink-0 cursor-pointer disabled:opacity-50"
+                >
+                  <Send className="w-4 h-4" />
+                </button>
+              </form>
+            )}
           </div>
 
         </div>

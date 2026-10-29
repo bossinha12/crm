@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { collection, onSnapshot, query, orderBy, doc, setDoc, deleteDoc, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, doc, setDoc, deleteDoc, getDocs, updateDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, sanitizeFirestoreData } from '../lib/firebase';
 import { User, Chat, Message, ChatStatus, Company, Lead, OperatingHours } from '../types';
+import AudioMessagePlayer from './AudioMessagePlayer';
 import { 
   BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer 
 } from 'recharts';
@@ -115,6 +116,91 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
   const [newLeadPhone, setNewLeadPhone] = useState('');
   const [newLeadNotes, setNewLeadNotes] = useState('');
   const [leadActionSuccess, setLeadActionSuccess] = useState<string | null>(null);
+
+  // Master Media Cleaner State
+  const [isMediaManagerOpen, setIsMediaManagerOpen] = useState(false);
+  const [isCleaningMedia, setIsCleaningMedia] = useState(false);
+  const [cleanMediaResult, setCleanMediaResult] = useState<string | null>(null);
+  const [cleanMode, setCleanMode] = useState<'audio_only' | 'image_only' | 'all'>('audio_only');
+
+  // Single message media deletion in mirror view
+  const handleDeleteSingleMessageMedia = async (chatId: string, messageId: string) => {
+    if (!confirm('Deseja remover este áudio desta conversa para liberar espaço no banco de dados?')) return;
+    try {
+      const msgRef = doc(db, 'companies', companyId, 'chats', chatId, 'messages', messageId);
+      await updateDoc(msgRef, {
+        audioUrl: null,
+        text: '🗑️ [Áudio removido pelo Administrador]'
+      });
+      setMirroredMessages(prev => prev.map(m => m.id === messageId ? { ...m, audioUrl: undefined, text: '🗑️ [Áudio removido pelo Administrador]' } : m));
+    } catch (err) {
+      console.error('Erro ao deletar áudio da mensagem:', err);
+      alert('Erro ao remover áudio: ' + (err instanceof Error ? err.message : String(err)));
+    }
+  };
+
+  // Bulk cleanup of audios / media across all company chats (Master Button)
+  const handleBulkCleanMedia = async () => {
+    if (!confirm(
+      cleanMode === 'audio_only'
+        ? 'Deseja realmente remover TODOS os arquivos de áudio gravados nos chats desta empresa? O histórico textual das mensagens continuará preservado.'
+        : cleanMode === 'image_only'
+        ? 'Deseja realmente remover todas as fotos dos chats desta empresa?'
+        : 'Deseja realmente remover TODOS os áudios e fotos de todas as conversas desta empresa?'
+    )) return;
+
+    setIsCleaningMedia(true);
+    setCleanMediaResult(null);
+
+    try {
+      let cleanedAudiosCount = 0;
+      let cleanedImagesCount = 0;
+
+      for (const c of chats) {
+        const msgsRef = collection(db, 'companies', companyId, 'chats', c.id, 'messages');
+        const msgsSnap = await getDocs(msgsRef);
+        
+        for (const msgDoc of msgsSnap.docs) {
+          const data = msgDoc.data() as Message;
+          const updates: any = {};
+          
+          if ((cleanMode === 'audio_only' || cleanMode === 'all') && data.audioUrl) {
+            updates.audioUrl = null;
+            if (!data.text || data.text === '🎤 Mensagem de Voz') {
+              updates.text = '🗑️ [Áudio removido pelo Administrador]';
+            }
+            cleanedAudiosCount++;
+          }
+
+          if ((cleanMode === 'image_only' || cleanMode === 'all') && data.imageUrl) {
+            updates.imageUrl = null;
+            if (!data.text || data.text === '📷 Foto enviada' || data.text === '📷 Foto do produto enviada') {
+              updates.text = '🗑️ [Foto removida pelo Administrador]';
+            }
+            cleanedImagesCount++;
+          }
+
+          if (Object.keys(updates).length > 0) {
+            await updateDoc(doc(db, 'companies', companyId, 'chats', c.id, 'messages', msgDoc.id), updates);
+          }
+        }
+      }
+
+      setCleanMediaResult(
+        `✅ Limpeza concluída com sucesso! ${cleanedAudiosCount} áudios e ${cleanedImagesCount} imagens foram removidos do banco de dados.`
+      );
+      setTimeout(() => {
+        setCleanMediaResult(null);
+        setIsMediaManagerOpen(false);
+      }, 4000);
+
+    } catch (err) {
+      console.error('Erro na limpeza em lote de mídias:', err);
+      setCleanMediaResult('Erro ao executar limpeza: ' + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setIsCleaningMedia(false);
+    }
+  };
 
   // Synchronize company profile and plan in real time
   useEffect(() => {
@@ -1335,6 +1421,15 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
             </span>
           )}
         </button>
+
+        <button
+          onClick={() => { setIsMediaManagerOpen(true); setCleanMediaResult(null); }}
+          className="px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center gap-1.5 text-rose-700 bg-rose-50/90 hover:bg-rose-100/90 border border-rose-200/80 ml-auto"
+          title="Gerenciar e limpar arquivos de áudio e imagens para liberar espaço no banco de dados"
+        >
+          <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+          <span>🧹 Limpeza de Mídias / Áudios</span>
+        </button>
       </div>
 
       {/* 30 Days Auto purging / cleaner helper banner */}
@@ -1581,7 +1676,7 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
                               )}
                             </div>
                             {m.imageUrl && (
-                              <div className="mt-1">
+                              <div className="mt-1 flex items-center gap-2">
                                 <a
                                   href={m.imageUrl}
                                   target="_blank"
@@ -1594,8 +1689,28 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
                                     referrerPolicy="no-referrer"
                                     className="w-10 h-10 object-cover rounded"
                                   />
-                                  <span className="text-[10px] text-indigo-300 underline">Foto ImgBB ↗</span>
+                                  <span className="text-[10px] text-indigo-300 underline">Foto ↗</span>
                                 </a>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteSingleMessageMedia(mirroredChatId || m.chatId, m.id)}
+                                  className="p-1 text-slate-500 hover:text-rose-400 rounded transition-colors"
+                                  title="Remover foto do banco de dados"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            )}
+
+                            {m.audioUrl && (
+                              <div className="mt-1.5 max-w-sm">
+                                <AudioMessagePlayer
+                                  audioUrl={m.audioUrl}
+                                  duration={m.audioDuration}
+                                  isMe={false}
+                                  canDelete={true}
+                                  onDelete={() => handleDeleteSingleMessageMedia(mirroredChatId || m.chatId, m.id)}
+                                />
                               </div>
                             )}
                           </div>
@@ -2542,6 +2657,138 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
                   </button>
                 </div>
               </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Modal Limpeza de Mídias / Áudios do Banco de Dados */}
+      {isMediaManagerOpen && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-lg w-full p-6 space-y-5 shadow-2xl text-white animate-in fade-in duration-200">
+            <div className="flex items-start justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-rose-500/20 border border-rose-500/30 text-rose-400 flex items-center justify-center shrink-0">
+                  <Trash2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Limpeza de Mídias e Áudios</h3>
+                  <p className="text-xs text-slate-400">Controle de armazenamento do Firestore</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsMediaManagerOpen(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4 text-xs space-y-2 text-slate-300">
+              <p className="font-semibold text-rose-300 flex items-center gap-1.5">
+                <span>🛡️ Política Zero Acúmulo no Banco de Dados:</span>
+              </p>
+              <p className="leading-relaxed">
+                As gravações de voz são enviadas para servidores temporários com link direto e expiração automática em 72h, mantendo o banco do Firestore leve.
+              </p>
+              <p className="leading-relaxed">
+                Com esta ferramenta Master, você pode <strong>remover instantaneamente</strong> todos os links de áudio e/ou fotos das mensagens de todas as <strong>{chats.length} conversas</strong> desta empresa, liberando espaço a qualquer momento.
+              </p>
+            </div>
+
+            {cleanMediaResult ? (
+              <div className="bg-emerald-950/80 border border-emerald-700/80 rounded-2xl p-4 text-center space-y-2">
+                <CheckCircle className="w-8 h-8 text-emerald-400 mx-auto" />
+                <p className="text-xs font-bold text-emerald-200">{cleanMediaResult}</p>
+                <button
+                  type="button"
+                  onClick={() => setIsMediaManagerOpen(false)}
+                  className="mt-2 px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
+                >
+                  Concluir
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block">
+                  Escolha o que deseja limpar do banco:
+                </label>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setCleanMode('audio_only')}
+                    className={`p-3 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
+                      cleanMode === 'audio_only'
+                        ? 'bg-rose-500/20 border-rose-500 text-white shadow-md'
+                        : 'bg-slate-950/40 border-slate-800 text-slate-400 hover:border-slate-700'
+                    }`}
+                  >
+                    <span className="text-sm font-bold">🎤 Apenas Áudios</span>
+                    <span className="text-[10px] mt-1 text-slate-400">Remove gravações de voz</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setCleanMode('image_only')}
+                    className={`p-3 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
+                      cleanMode === 'image_only'
+                        ? 'bg-rose-500/20 border-rose-500 text-white shadow-md'
+                        : 'bg-slate-950/40 border-slate-800 text-slate-400 hover:border-slate-700'
+                    }`}
+                  >
+                    <span className="text-sm font-bold">📷 Apenas Imagens</span>
+                    <span className="text-[10px] mt-1 text-slate-400">Remove fotos anexadas</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setCleanMode('all')}
+                    className={`p-3 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
+                      cleanMode === 'all'
+                        ? 'bg-rose-500/20 border-rose-500 text-white shadow-md'
+                        : 'bg-slate-950/40 border-slate-800 text-slate-400 hover:border-slate-700'
+                    }`}
+                  >
+                    <span className="text-sm font-bold">💥 Todas as Mídias</span>
+                    <span className="text-[10px] mt-1 text-slate-400">Áudios + Imagens</span>
+                  </button>
+                </div>
+
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  * O texto das mensagens e o histórico de atendimentos continuarão intactos, sendo substituída apenas a mídia removida pela indicação <span className="font-mono text-slate-300">[Removido pelo Administrador]</span>.
+                </p>
+
+                <div className="pt-2 flex justify-end gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setIsMediaManagerOpen(false)}
+                    disabled={isCleaningMedia}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleBulkCleanMedia}
+                    disabled={isCleaningMedia}
+                    className="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer flex items-center gap-2 disabled:opacity-50"
+                  >
+                    {isCleaningMedia ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Limpando mídias...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Trash2 className="w-4 h-4" />
+                        <span>Executar Limpeza Agora</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
             )}
           </div>
         </div>

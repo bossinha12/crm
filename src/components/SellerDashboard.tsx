@@ -1,14 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { collection, onSnapshot, query, orderBy, doc, updateDoc, addDoc, getDoc, setDoc, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, doc, updateDoc, addDoc, getDoc, setDoc, getDocs, deleteDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, sanitizeFirestoreData } from '../lib/firebase';
 import { uploadToImgBB } from '../lib/imgbb';
+import { uploadAudio } from '../lib/audioUpload';
+import { useAudioRecorder } from '../lib/useAudioRecorder';
+import AudioMessagePlayer from './AudioMessagePlayer';
 import { Chat, User, Message, ChatStatus, Company, InternalMessage } from '../types';
 import { crmAlarm } from '../lib/audio';
 import { 
   MessageSquare, User as UserIcon, Send, LogOut, Phone, ShieldClose, 
   Volume2, VolumeX, Sparkles, Copy, Check, CheckSquare,
   Image as ImageIcon, Camera, Loader2, ExternalLink, X, ShieldCheck, Megaphone,
-  Upload, CheckCircle, BellRing, PhoneCall, Clock
+  Upload, CheckCircle, BellRing, PhoneCall, Clock, Mic, Trash2, Music
 } from 'lucide-react';
 import { formatMessageDateTime } from '../lib/formatters';
 import { sendPwaPushNotification } from '../lib/notifications';
@@ -69,6 +72,18 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+
+  // Audio Recording & Upload State
+  const { 
+    isRecording, 
+    formattedTime, 
+    error: audioRecError, 
+    startRecording, 
+    stopRecording, 
+    cancelRecording 
+  } = useAudioRecorder();
+  const [isUploadingAudio, setIsUploadingAudio] = useState(false);
+  const audioFileInputRef = useRef<HTMLInputElement>(null);
 
   // Keep a synced ref of chats to prevent re-subscriptions in dependent effects
   const chatsRef = useRef<Chat[]>([]);
@@ -706,6 +721,121 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
     }
   };
 
+  const handleFinishAndSendAudio = async () => {
+    if (!selectedChatId || !isRecording) return;
+    try {
+      const { blob, duration } = await stopRecording();
+      await sendAudioResponse(blob, duration);
+    } catch (err: any) {
+      console.error('Erro ao parar gravação do vendedor:', err);
+      setUploadError(err.message || 'Erro ao finalizar gravação de áudio.');
+      setTimeout(() => setUploadError(null), 4000);
+    }
+  };
+
+  const handleAudioFileInput = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !selectedChatId) return;
+
+    const isAudioType = file.type.startsWith('audio/') || /\.(mp3|wav|ogg|m4a|aac|weba|flac|wma)$/i.test(file.name);
+    if (!isAudioType) {
+      setUploadError('Selecione um arquivo de áudio ou música válido (MP3, WAV, OGG, M4A, etc).');
+      setTimeout(() => setUploadError(null), 4000);
+      return;
+    }
+
+    if (file.size > 25 * 1024 * 1024) {
+      setUploadError('O arquivo de áudio deve ter no máximo 25MB.');
+      setTimeout(() => setUploadError(null), 4000);
+      return;
+    }
+
+    // Try detecting audio duration before sending
+    let duration = 0;
+    try {
+      const objUrl = URL.createObjectURL(file);
+      const audioProbe = new Audio(objUrl);
+      await new Promise<void>((resolve) => {
+        audioProbe.onloadedmetadata = () => {
+          if (audioProbe.duration && !isNaN(audioProbe.duration) && isFinite(audioProbe.duration)) {
+            duration = Math.round(audioProbe.duration);
+          }
+          URL.revokeObjectURL(objUrl);
+          resolve();
+        };
+        audioProbe.onerror = () => {
+          URL.revokeObjectURL(objUrl);
+          resolve();
+        };
+        setTimeout(resolve, 1500);
+      });
+    } catch (e) {}
+
+    const cleanLabel = file.name ? `🎵 ${file.name}` : '🎵 Áudio (MP3)';
+    await sendAudioResponse(file, duration, cleanLabel);
+    if (audioFileInputRef.current) audioFileInputRef.current.value = '';
+  };
+
+  const sendAudioResponse = async (fileOrBlob: Blob | File, duration?: number, customLabel?: string) => {
+    if (!selectedChatId) return;
+    setIsUploadingAudio(true);
+    setUploadError(null);
+
+    const messageText = customLabel || '🎤 Mensagem de Voz';
+
+    try {
+      // 1. Upload to temporary 72h host (0 heavy storage in Firestore!)
+      const { audioUrl } = await uploadAudio(fileOrBlob);
+
+      // Save message in Firestore with audio URL only
+      const messagesRef = collection(db, 'companies', companyId, 'chats', selectedChatId, 'messages');
+      await addDoc(messagesRef, sanitizeFirestoreData({
+        chatId: selectedChatId,
+        companyId,
+        senderType: 'seller',
+        senderName: sellerUser.name,
+        senderAvatar: sellerAvatar || sellerUser.avatarUrl || null,
+        text: messageText,
+        audioUrl,
+        audioDuration: duration || null,
+        createdAt: new Date().toISOString()
+      }));
+
+      const chatDocRef = doc(db, 'companies', companyId, 'chats', selectedChatId);
+      await updateDoc(chatDocRef, sanitizeFirestoreData({
+        lastMessage: messageText,
+        lastMessageAt: new Date().toISOString(),
+        lastMessageSender: 'seller',
+        sellerAvatar: sellerAvatar || sellerUser.avatarUrl || null,
+        unreadByClient: true,
+        unreadBySeller: false,
+        updatedAt: new Date().toISOString()
+      }));
+    } catch (err) {
+      console.error("Erro ao enviar áudio pelo vendedor:", err);
+      setUploadError(err instanceof Error ? err.message : 'Erro ao processar áudio.');
+      setTimeout(() => setUploadError(null), 4000);
+    } finally {
+      setIsUploadingAudio(false);
+    }
+  };
+
+  // Allow deleting an individual audio message to free database storage
+  const handleDeleteAudioMessage = async (messageId: string) => {
+    if (!selectedChatId) return;
+    if (!confirm('Deseja remover este áudio da conversa?')) return;
+
+    try {
+      const msgDocRef = doc(db, 'companies', companyId, 'chats', selectedChatId, 'messages', messageId);
+      await updateDoc(msgDocRef, {
+        audioUrl: null,
+        text: '🗑️ [Áudio removido pelo Vendedor]'
+      });
+    } catch (err) {
+      console.error('Erro ao remover áudio da mensagem:', err);
+    }
+  };
+
   const handleCloseChat = async () => {
     if (!selectedChatId) return;
     if (!confirm('Tem certeza de que deseja CONCLUIR e ARQUIVAR este atendimento?')) return;
@@ -1196,6 +1326,7 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
                   const isSystem = m.senderName === 'Sistema';
                   const isSeller = m.senderType === 'seller';
                   const hasImage = !!m.imageUrl;
+                  const hasAudio = !!m.audioUrl;
                   
                   if (isSystem) {
                     return (
@@ -1223,7 +1354,7 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
                           isSeller
                             ? 'bg-slate-800 text-slate-100 rounded-tr-none border border-slate-800 shadow-md shadow-slate-100'
                             : 'bg-indigo-50 text-slate-900 rounded-tl-none border border-indigo-100 shadow-sm'
-                        } ${hasImage ? 'p-2' : 'px-4 py-2.5'}`}
+                        } ${hasImage ? 'p-2' : hasAudio ? 'p-1.5' : 'px-4 py-2.5'}`}
                       >
                         {hasImage && (
                           <div className="space-y-1.5">
@@ -1249,7 +1380,18 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
                             )}
                           </div>
                         )}
-                        {!hasImage && m.text}
+
+                        {hasAudio && (
+                          <AudioMessagePlayer
+                            audioUrl={m.audioUrl!}
+                            duration={m.audioDuration}
+                            isMe={isSeller}
+                            canDelete={true}
+                            onDelete={() => handleDeleteAudioMessage(m.id)}
+                          />
+                        )}
+
+                        {!hasImage && !hasAudio && m.text}
 
                         {/* Date and Time */}
                         {m.createdAt && (
@@ -1298,48 +1440,136 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
                   ))}
                 </div>
 
-                <form onSubmit={handleSendResponse} className="flex items-center gap-2">
-                  {/* Hidden File Input for ImgBB Upload */}
-                  <input
-                    type="file"
-                    ref={imageInputRef}
-                    accept="image/*"
-                    className="hidden"
-                    onChange={handleImageUpload}
-                    disabled={isUploadingImage}
-                  />
+                {/* Hidden File Input for ImgBB Upload */}
+                <input
+                  type="file"
+                  ref={imageInputRef}
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleImageUpload}
+                  disabled={isUploadingImage || isUploadingAudio}
+                />
 
-                  {/* Camera / Image Upload Button */}
-                  <button
-                    type="button"
-                    disabled={isUploadingImage}
-                    onClick={() => imageInputRef.current?.click()}
-                    title="Enviar foto do produto (hospedada no ImgBB)"
-                    className="p-2.5 text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 active:bg-indigo-100 rounded-xl transition-all flex items-center justify-center shrink-0 border border-slate-200 bg-white cursor-pointer disabled:opacity-50"
-                  >
-                    {isUploadingImage ? (
-                      <Loader2 className="w-5 h-5 text-indigo-600 animate-spin" />
-                    ) : (
-                      <Camera className="w-5 h-5" />
-                    )}
-                  </button>
+                {/* Hidden File Input for Audio File Upload */}
+                <input
+                  type="file"
+                  ref={audioFileInputRef}
+                  accept="audio/*,.mp3,.wav,.ogg,.m4a,.aac,.weba,.flac"
+                  className="hidden"
+                  onChange={handleAudioFileInput}
+                  disabled={isUploadingImage || isUploadingAudio}
+                />
 
-                  <input
-                    type="text"
-                    required
-                    value={currentResponse}
-                    onChange={(e) => setCurrentResponse(e.target.value)}
-                    placeholder={isUploadingImage ? "Enviando imagem ao ImgBB..." : "Escreva sua resposta de atendimento..."}
-                    className="grow py-2.5 px-4 text-sm text-slate-800 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
-                  />
-                  <button
-                    type="submit"
-                    disabled={isUploadingImage}
-                    className="p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-md shadow-indigo-100 transition-colors flex items-center justify-center shrink-0 cursor-pointer disabled:opacity-50"
-                  >
-                    <Send className="w-4 h-4" />
-                  </button>
-                </form>
+                {/* Voice recording bar */}
+                {isRecording ? (
+                  <div className="flex items-center gap-2 bg-rose-50 border border-rose-200 p-2.5 rounded-2xl shadow-sm animate-fade-in">
+                    <div className="flex items-center gap-2 grow px-2">
+                      <span className="w-3 h-3 rounded-full bg-rose-600 animate-ping shrink-0" />
+                      <span className="text-xs font-bold text-rose-700 font-mono flex items-center gap-1.5">
+                        <Mic className="w-4 h-4 text-rose-600 animate-pulse" />
+                        <span>Gravando resposta de voz: {formattedTime}</span>
+                      </span>
+                    </div>
+
+                    {/* Cancel audio */}
+                    <button
+                      type="button"
+                      onClick={cancelRecording}
+                      title="Descartar áudio"
+                      className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-100 rounded-xl transition-colors cursor-pointer"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+
+                    {/* Send recorded audio */}
+                    <button
+                      type="button"
+                      onClick={handleFinishAndSendAudio}
+                      disabled={isUploadingAudio}
+                      title="Concluir e enviar áudio"
+                      className="px-4 py-2 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white rounded-xl shadow-md shadow-rose-200 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                    >
+                      {isUploadingAudio ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <>
+                          <Send className="w-3.5 h-3.5" />
+                          <span>Enviar Áudio</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                ) : (
+                  <form onSubmit={handleSendResponse} className="flex items-center gap-2">
+                    {/* Camera / Image Upload Button */}
+                    <button
+                      type="button"
+                      disabled={isUploadingImage || isUploadingAudio}
+                      onClick={() => imageInputRef.current?.click()}
+                      title="Enviar foto do produto (hospedada no ImgBB)"
+                      className="p-2.5 text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 active:bg-indigo-100 rounded-xl transition-all flex items-center justify-center shrink-0 border border-slate-200 bg-white cursor-pointer disabled:opacity-50"
+                    >
+                      {isUploadingImage ? (
+                        <Loader2 className="w-5 h-5 text-indigo-600 animate-spin" />
+                      ) : (
+                        <Camera className="w-5 h-5" />
+                      )}
+                    </button>
+
+                    {/* Microphone button (Record voice) */}
+                    <button
+                      type="button"
+                      disabled={isUploadingImage || isUploadingAudio}
+                      onClick={startRecording}
+                      title="Gravar resposta em áudio no microfone"
+                      className="p-2.5 text-slate-600 hover:text-rose-600 hover:bg-rose-50 active:bg-rose-100 rounded-xl transition-all flex items-center justify-center shrink-0 border border-slate-200 bg-white cursor-pointer disabled:opacity-50"
+                    >
+                      <Mic className="w-5 h-5 text-rose-500" />
+                    </button>
+
+                    {/* MP3 / Audio File from PC button */}
+                    <button
+                      type="button"
+                      disabled={isUploadingImage || isUploadingAudio}
+                      onClick={() => audioFileInputRef.current?.click()}
+                      title="Enviar arquivo de áudio ou MP3 do computador"
+                      className="p-2.5 text-slate-600 hover:text-purple-600 hover:bg-purple-50 active:bg-purple-100 rounded-xl transition-all flex items-center justify-center shrink-0 border border-slate-200 bg-white cursor-pointer disabled:opacity-50"
+                    >
+                      <Music className="w-5 h-5 text-purple-600" />
+                    </button>
+
+                    <input
+                      type="text"
+                      required
+                      value={currentResponse}
+                      onChange={(e) => setCurrentResponse(e.target.value)}
+                      placeholder={
+                        isUploadingImage 
+                          ? "Enviando imagem ao ImgBB..." 
+                          : isUploadingAudio 
+                          ? "Enviando áudio..." 
+                          : "Escreva sua resposta de atendimento..."
+                      }
+                      className="grow py-2.5 px-4 text-sm text-slate-800 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                    />
+
+                    <button
+                      type="submit"
+                      disabled={isUploadingImage || isUploadingAudio}
+                      className="p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-md shadow-indigo-100 transition-colors flex items-center justify-center shrink-0 cursor-pointer disabled:opacity-50"
+                    >
+                      <Send className="w-4 h-4" />
+                    </button>
+                  </form>
+                )}
+
+                {isUploadingAudio && (
+                  <p className="text-[11px] text-indigo-600 font-medium flex items-center gap-1">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    <span>Processando e enviando áudio... Aguarde.</span>
+                  </p>
+                )}
+
                 {isUploadingImage && (
                   <p className="text-[11px] text-indigo-600 font-medium flex items-center gap-1">
                     <Loader2 className="w-3 h-3 animate-spin" />

@@ -2,11 +2,15 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { doc, setDoc, collection, onSnapshot, query, orderBy, addDoc, updateDoc, getDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, sanitizeFirestoreData } from '../lib/firebase';
 import { uploadToImgBB } from '../lib/imgbb';
+import { uploadAudio } from '../lib/audioUpload';
+import { useAudioRecorder } from '../lib/useAudioRecorder';
+import AudioMessagePlayer from './AudioMessagePlayer';
 import { Chat, Message, ChatStatus, Lead, Company } from '../types';
 import { 
   Send, MessageSquare, Phone, User, CheckCheck, Landmark, RefreshCw, 
   XCircle, Image as ImageIcon, Camera, Loader2, ExternalLink, X, ShieldCheck,
-  Clock, Bell, BellRing, BellOff, Calendar, CheckCircle2, Sparkles, AlertCircle
+  Clock, Bell, BellRing, BellOff, Calendar, CheckCircle2, Sparkles, AlertCircle,
+  Mic, Trash2, Music
 } from 'lucide-react';
 import { formatMessageDateTime } from '../lib/formatters';
 import { crmAlarm } from '../lib/audio';
@@ -97,6 +101,18 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+
+  // Audio Recording & Upload State
+  const { 
+    isRecording, 
+    formattedTime, 
+    error: audioRecError, 
+    startRecording, 
+    stopRecording, 
+    cancelRecording 
+  } = useAudioRecorder();
+  const [isUploadingAudio, setIsUploadingAudio] = useState(false);
+  const audioFileInputRef = useRef<HTMLInputElement>(null);
   
   const clientMessagesContainerRef = useRef<HTMLDivElement>(null);
   const activeChatRef = useRef<Chat | null>(null);
@@ -564,6 +580,148 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
     }
   };
 
+  const handleFinishAndSendAudio = async () => {
+    if (!chatId || !isRecording) return;
+    try {
+      const { blob, duration } = await stopRecording();
+      await sendAudioMessage(blob, duration);
+    } catch (err: any) {
+      console.error('Erro ao parar gravação:', err);
+      setUploadError(err.message || 'Erro ao finalizar gravação de áudio.');
+      setTimeout(() => setUploadError(null), 4000);
+    }
+  };
+
+  const handleAudioFileInput = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !chatId) return;
+
+    const isAudioType = file.type.startsWith('audio/') || /\.(mp3|wav|ogg|m4a|aac|weba|flac|wma)$/i.test(file.name);
+    if (!isAudioType) {
+      setUploadError('Selecione um arquivo de áudio ou música válido (MP3, WAV, OGG, M4A, etc).');
+      setTimeout(() => setUploadError(null), 4000);
+      return;
+    }
+
+    if (file.size > 25 * 1024 * 1024) {
+      setUploadError('O arquivo de áudio deve ter no máximo 25MB.');
+      setTimeout(() => setUploadError(null), 4000);
+      return;
+    }
+
+    let duration = 0;
+    try {
+      const objUrl = URL.createObjectURL(file);
+      const audioProbe = new Audio(objUrl);
+      await new Promise<void>((resolve) => {
+        audioProbe.onloadedmetadata = () => {
+          if (audioProbe.duration && !isNaN(audioProbe.duration) && isFinite(audioProbe.duration)) {
+            duration = Math.round(audioProbe.duration);
+          }
+          URL.revokeObjectURL(objUrl);
+          resolve();
+        };
+        audioProbe.onerror = () => {
+          URL.revokeObjectURL(objUrl);
+          resolve();
+        };
+        setTimeout(resolve, 1500);
+      });
+    } catch (e) {}
+
+    const cleanLabel = file.name ? `🎵 ${file.name}` : '🎵 Áudio (MP3)';
+    await sendAudioMessage(file, duration, cleanLabel);
+    if (audioFileInputRef.current) audioFileInputRef.current.value = '';
+  };
+
+  const sendAudioMessage = async (fileOrBlob: Blob | File, duration?: number, customLabel?: string) => {
+    if (!chatId) return;
+    setIsUploadingAudio(true);
+    setUploadError(null);
+
+    const messageText = customLabel || '🎤 Mensagem de Voz';
+
+    try {
+      // 1. Upload to temporary 72h host (0 heavy storage in Firestore!)
+      const { audioUrl } = await uploadAudio(fileOrBlob);
+
+      const newMsgId = 'msg_' + Math.random().toString(36).substring(2, 11) + '_' + Date.now().toString().slice(-4);
+      const newMsg: Message = {
+        id: newMsgId,
+        chatId,
+        companyId,
+        senderType: 'client',
+        senderName: activeChat?.clientName || clientName || 'Cliente',
+        text: messageText,
+        audioUrl,
+        audioDuration: duration,
+        createdAt: new Date().toISOString()
+      };
+
+      // Optimistic update
+      const updatedMessages = [...messages, newMsg];
+      setMessages(updatedMessages);
+      localStorage.setItem(`atendepro_backup_msgs_${chatId}`, JSON.stringify(updatedMessages));
+
+      if (activeChat) {
+        const updatedChat = {
+          ...activeChat,
+          lastMessage: messageText,
+          lastMessageAt: new Date().toISOString(),
+          lastMessageSender: 'client' as const,
+          unreadBySeller: true,
+          updatedAt: new Date().toISOString()
+        };
+        setActiveChat(updatedChat);
+        localStorage.setItem(`atendepro_backup_chat_${chatId}`, JSON.stringify(updatedChat));
+      }
+
+      // Save message to Firestore with audio URL only
+      const messagesRef = collection(db, 'companies', companyId, 'chats', chatId, 'messages');
+      await addDoc(messagesRef, sanitizeFirestoreData({
+        chatId,
+        companyId,
+        senderType: 'client',
+        senderName: activeChat?.clientName || clientName || 'Cliente',
+        text: '🎤 Mensagem de Voz',
+        audioUrl,
+        audioDuration: duration || null,
+        createdAt: new Date().toISOString()
+      }));
+
+      const chatDocRef = doc(db, 'companies', companyId, 'chats', chatId);
+      const chatPayload = activeChat ? {
+        ...activeChat,
+        lastMessage: '🎤 Mensagem de Voz',
+        lastMessageAt: new Date().toISOString(),
+        lastMessageSender: 'client' as const,
+        unreadBySeller: true,
+        updatedAt: new Date().toISOString()
+      } : {
+        id: chatId,
+        companyId,
+        clientName: clientName || 'Cliente',
+        clientPhone: '',
+        status: ChatStatus.NEW,
+        unreadBySeller: true,
+        unreadByClient: false,
+        lastMessage: '🎤 Mensagem de Voz',
+        lastMessageAt: new Date().toISOString(),
+        lastMessageSender: 'client' as const,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      await setDoc(chatDocRef, sanitizeFirestoreData(chatPayload), { merge: true });
+
+    } catch (err) {
+      console.error('Erro ao enviar áudio do cliente:', err);
+      setUploadError(err instanceof Error ? err.message : 'Erro ao processar envio de áudio.');
+      setTimeout(() => setUploadError(null), 4000);
+    } finally {
+      setIsUploadingAudio(false);
+    }
+  };
+
   const clearChatSession = () => {
     if (confirm('Deseja mesmo encerrar e abrir uma nova solicitação de atendimento?')) {
       localStorage.removeItem(`atendepro_client_chat_id`);
@@ -907,6 +1065,7 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
         {messages.map((m) => {
           const isMe = m.senderType === 'client';
           const hasImage = !!m.imageUrl;
+          const hasAudio = !!m.audioUrl;
           const sellerPhoto = m.senderAvatar || resolvedSellerAvatar || activeChat?.sellerAvatar;
 
           return (
@@ -930,7 +1089,7 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
                 </div>
               )}
 
-              <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} max-w-[80%]`}>
+              <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} max-w-[85%]`}>
                 <div className="text-[10px] text-slate-400 font-bold px-1 mb-0.5 uppercase tracking-wide flex items-center gap-1">
                   <span>{isMe ? 'Você' : m.senderName}</span>
                   {!isMe && m.senderName !== 'Sistema' && (
@@ -945,7 +1104,7 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
                     isMe
                       ? 'bg-indigo-600 text-white rounded-br-none shadow-indigo-600/10'
                       : 'bg-white text-slate-800 rounded-bl-none border border-slate-200/80 shadow-slate-200/40'
-                  } ${hasImage ? 'p-2' : 'px-4 py-2.5'}`}
+                  } ${hasImage ? 'p-2' : hasAudio ? 'p-1.5' : 'px-4 py-2.5'}`}
                 >
                   {hasImage && (
                     <div className="space-y-1.5">
@@ -971,7 +1130,16 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
                       )}
                     </div>
                   )}
-                  {!hasImage && m.text}
+
+                  {hasAudio && (
+                    <AudioMessagePlayer
+                      audioUrl={m.audioUrl!}
+                      duration={m.audioDuration}
+                      isMe={isMe}
+                    />
+                  )}
+
+                  {!hasImage && !hasAudio && m.text}
 
                   {/* Message timestamp: date and time */}
                   {m.createdAt && (
@@ -1010,49 +1178,135 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
       {/* Active Messaging input footer */}
       {activeChat?.status !== ChatStatus.CLOSED && (
         <div className="bg-slate-50 border-t border-slate-200 p-3 shrink-0">
-          <form onSubmit={handleSendMessage} className="flex items-center gap-2">
-            {/* Hidden File Input for ImgBB Upload */}
-            <input
-              type="file"
-              ref={imageInputRef}
-              accept="image/*"
-              className="hidden"
-              onChange={handleImageUpload}
-              disabled={isUploadingImage}
-            />
+          {/* Hidden File Input for ImgBB Upload */}
+          <input
+            type="file"
+            ref={imageInputRef}
+            accept="image/*"
+            className="hidden"
+            onChange={handleImageUpload}
+            disabled={isUploadingImage || isUploadingAudio}
+          />
 
-            {/* Photo / Image attach button */}
-            <button
-              type="button"
-              disabled={isUploadingImage}
-              onClick={() => imageInputRef.current?.click()}
-              title="Enviar foto do celular ou computador (ImgBB)"
-              className="p-2.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 active:bg-indigo-100 rounded-xl transition-all flex items-center justify-center shrink-0 border border-slate-200 bg-white cursor-pointer disabled:opacity-50"
-            >
-              {isUploadingImage ? (
-                <Loader2 className="w-5 h-5 text-indigo-600 animate-spin" />
-              ) : (
-                <Camera className="w-5 h-5" />
-              )}
-            </button>
+          {/* Hidden File Input for Audio File Upload */}
+          <input
+            type="file"
+            ref={audioFileInputRef}
+            accept="audio/*,.mp3,.wav,.ogg,.m4a,.aac,.weba,.flac"
+            className="hidden"
+            onChange={handleAudioFileInput}
+            disabled={isUploadingImage || isUploadingAudio}
+          />
 
-            <input
-              type="text"
-              required
-              value={currentMessage}
-              onChange={(e) => setCurrentMessage(e.target.value)}
-              placeholder={isUploadingImage ? "Enviando imagem..." : "Digite sua mensagem..."}
-              className="grow py-2.5 px-3.5 text-sm text-slate-800 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
-            />
+          {/* Audio recording in progress bar */}
+          {isRecording ? (
+            <div className="flex items-center gap-2 bg-rose-50 border border-rose-200 p-2 rounded-2xl shadow-sm animate-fade-in">
+              <div className="flex items-center gap-2 grow px-2">
+                <span className="w-3 h-3 rounded-full bg-rose-600 animate-ping shrink-0" />
+                <span className="text-xs font-bold text-rose-700 font-mono flex items-center gap-1.5">
+                  <Mic className="w-4 h-4 text-rose-600 animate-pulse" />
+                  <span>Gravando áudio: {formattedTime}</span>
+                </span>
+              </div>
 
-            <button
-              type="submit"
-              disabled={isUploadingImage}
-              className="p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-md shadow-indigo-100 transition-colors flex items-center justify-center shrink-0 cursor-pointer disabled:opacity-50"
-            >
-              <Send className="w-4 h-4" />
-            </button>
-          </form>
+              {/* Cancel audio */}
+              <button
+                type="button"
+                onClick={cancelRecording}
+                title="Descartar áudio"
+                className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-100 rounded-xl transition-colors cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+
+              {/* Send recorded audio */}
+              <button
+                type="button"
+                onClick={handleFinishAndSendAudio}
+                disabled={isUploadingAudio}
+                title="Concluir e enviar áudio"
+                className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white rounded-xl shadow-md shadow-rose-200 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+              >
+                {isUploadingAudio ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <>
+                    <Send className="w-3.5 h-3.5" />
+                    <span>Enviar</span>
+                  </>
+                )}
+              </button>
+            </div>
+          ) : (
+            <form onSubmit={handleSendMessage} className="flex items-center gap-2">
+              {/* Photo / Image attach button */}
+              <button
+                type="button"
+                disabled={isUploadingImage || isUploadingAudio}
+                onClick={() => imageInputRef.current?.click()}
+                title="Enviar foto do celular ou computador (ImgBB)"
+                className="p-2.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 active:bg-indigo-100 rounded-xl transition-all flex items-center justify-center shrink-0 border border-slate-200 bg-white cursor-pointer disabled:opacity-50"
+              >
+                {isUploadingImage ? (
+                  <Loader2 className="w-5 h-5 text-indigo-600 animate-spin" />
+                ) : (
+                  <Camera className="w-5 h-5" />
+                )}
+              </button>
+
+              {/* Microphone / Record Audio button */}
+              <button
+                type="button"
+                disabled={isUploadingImage || isUploadingAudio}
+                onClick={startRecording}
+                title="Gravar mensagem de voz no microfone"
+                className="p-2.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 active:bg-rose-100 rounded-xl transition-all flex items-center justify-center shrink-0 border border-slate-200 bg-white cursor-pointer disabled:opacity-50"
+              >
+                <Mic className="w-5 h-5 text-rose-500" />
+              </button>
+
+              {/* MP3 / Audio File from Computer or Phone */}
+              <button
+                type="button"
+                disabled={isUploadingImage || isUploadingAudio}
+                onClick={() => audioFileInputRef.current?.click()}
+                title="Enviar arquivo de áudio ou MP3 do computador/celular"
+                className="p-2.5 text-slate-500 hover:text-purple-600 hover:bg-purple-50 active:bg-purple-100 rounded-xl transition-all flex items-center justify-center shrink-0 border border-slate-200 bg-white cursor-pointer disabled:opacity-50"
+              >
+                <Music className="w-5 h-5 text-purple-600" />
+              </button>
+
+              <input
+                type="text"
+                required
+                value={currentMessage}
+                onChange={(e) => setCurrentMessage(e.target.value)}
+                placeholder={
+                  isUploadingImage 
+                    ? "Enviando imagem..." 
+                    : isUploadingAudio 
+                    ? "Enviando áudio..." 
+                    : "Digite sua mensagem..."
+                }
+                className="grow py-2.5 px-3.5 text-sm text-slate-800 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+              />
+
+              <button
+                type="submit"
+                disabled={isUploadingImage || isUploadingAudio}
+                className="p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-md shadow-indigo-100 transition-colors flex items-center justify-center shrink-0 cursor-pointer disabled:opacity-50"
+              >
+                <Send className="w-4 h-4" />
+              </button>
+            </form>
+          )}
+
+          {isUploadingAudio && (
+            <p className="text-[11px] text-indigo-600 font-medium mt-1 flex items-center gap-1 px-1">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              <span>Processando áudio... Aguarde.</span>
+            </p>
+          )}
           {isUploadingImage && (
             <p className="text-[11px] text-indigo-600 font-medium mt-1 flex items-center gap-1 px-1">
               <Loader2 className="w-3 h-3 animate-spin" />
