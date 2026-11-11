@@ -108,3 +108,59 @@ export async function getStudioDelivery(deliveryId: string): Promise<StudioDeliv
     return null;
   }
 }
+
+// Excluir entrega específica do banco Turso bossa
+export async function deleteStudioDelivery(deliveryId: string): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/studio/deliveries/${deliveryId}`, {
+      method: 'DELETE'
+    });
+    return res.ok;
+  } catch (e) {
+    console.error('Erro ao deletar projeto no Turso:', e);
+    return false;
+  }
+}
+
+// Limpeza em lote de projetos concluídos no banco Turso bossa
+export async function cleanupStudioDeliveries(mode: 'completed' | 'all' = 'completed'): Promise<{ ok: boolean; message: string }> {
+  const res = await fetch('/api/studio/cleanup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode })
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Erro ao executar limpeza no banco Turso');
+  }
+
+  return await res.json();
+}
+
+// Disparo de Download direto do arquivo de áudio ou vídeo no PC do cliente/produtor
+export async function downloadMediaFile(url: string, filename: string): Promise<void> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('Falha ao obter arquivo');
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+  } catch (err) {
+    // Fallback padrão se CORS bloquear fetch
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+}

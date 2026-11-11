@@ -10,11 +10,12 @@ import {
   Send, MessageSquare, Phone, User, CheckCheck, Landmark, RefreshCw, 
   XCircle, Image as ImageIcon, Camera, Loader2, ExternalLink, X, ShieldCheck,
   Clock, Bell, BellRing, BellOff, Calendar, CheckCircle2, Sparkles, AlertCircle,
-  Mic, Trash2, Music
+  Mic, Trash2, Music, Lock, Download, Video
 } from 'lucide-react';
 import { formatMessageDateTime } from '../lib/formatters';
 import { crmAlarm } from '../lib/audio';
 import { checkOperatingHours, OperatingHoursStatus } from '../lib/operatingHours';
+import { isBossaStudioCompany, downloadMediaFile } from '../lib/studioService';
 
 interface ClientWidgetProps {
   companyId: string;
@@ -1066,6 +1067,7 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
           const isMe = m.senderType === 'client';
           const hasImage = !!m.imageUrl;
           const hasAudio = !!m.audioUrl;
+          const hasVideo = !!m.videoUrl;
           const sellerPhoto = m.senderAvatar || resolvedSellerAvatar || activeChat?.sellerAvatar;
 
           return (
@@ -1136,15 +1138,62 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
                       audioUrl={m.audioUrl!}
                       duration={m.audioDuration}
                       isMe={isMe}
-                      isStudioDelivery={m.isStudioDelivery}
-                      downloadUnlocked={m.downloadUnlocked}
+                      isStudioDelivery={Boolean(m.isStudioDelivery || isBossaStudioCompany(company, companyId))}
+                      downloadUnlocked={Boolean(m.downloadUnlocked)}
                       title={m.text !== '🎤 Mensagem de Voz' ? m.text : undefined}
                       downloadUrl={m.downloadUnlocked ? m.audioUrl : null}
                       fileName={m.fileName || 'Audio_Final_Bossa.mp3'}
                     />
                   )}
 
-                  {!hasImage && !hasAudio && m.text}
+                  {hasVideo && (
+                    <div className="space-y-2 min-w-[240px] max-w-sm">
+                      <div className="rounded-xl overflow-hidden bg-black/60 relative border border-slate-200">
+                        <video
+                          src={m.videoUrl}
+                          controls
+                          preload="metadata"
+                          className="w-full max-h-60 object-contain rounded-xl"
+                        />
+                      </div>
+
+                      {m.text && (
+                        <p className="text-xs font-semibold px-1">{m.text}</p>
+                      )}
+
+                      {/* STUDIO EXCLUSIVE: Prévia / Download de Vídeo para o Cliente */}
+                      {Boolean(m.isStudioDelivery || isBossaStudioCompany(company, companyId)) && (
+                        <div className="pt-1.5 border-t border-slate-200/80">
+                          {m.downloadUnlocked ? (
+                            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 flex items-center justify-between gap-2 shadow-xs">
+                              <div className="flex items-center gap-1.5 truncate">
+                                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                                <span className="text-xs font-bold text-emerald-900 truncate">Vídeo Aprovado & Pago!</span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => downloadMediaFile(m.videoUrl!, m.fileName || 'Video_Final_Bossa.mp4')}
+                                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold text-xs rounded-lg transition-all flex items-center gap-1.5 shadow-sm shrink-0 cursor-pointer"
+                                title="Baixar vídeo em alta resolução"
+                              >
+                                <Download className="w-3.5 h-3.5" />
+                                <span>Baixar Vídeo</span>
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="bg-amber-50/90 border border-amber-200/80 rounded-xl p-2.5 flex items-center gap-2">
+                              <Lock className="w-4 h-4 text-amber-600 shrink-0" />
+                              <p className="text-[11px] text-amber-950 font-medium leading-tight">
+                                Modo Prévia: assista à demonstração. O download será liberado após o pagamento.
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {!hasImage && !hasAudio && !hasVideo && m.text}
 
                   {/* Message timestamp: date and time */}
                   {m.createdAt && (

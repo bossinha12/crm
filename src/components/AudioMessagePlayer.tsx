@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Play, Pause, Volume2, Trash2, Download, AlertCircle, Lock, Unlock, CheckCircle2, Music, Sparkles } from 'lucide-react';
+import { downloadMediaFile } from '../lib/studioService';
 
 interface AudioMessagePlayerProps {
   audioUrl: string;
@@ -269,17 +270,15 @@ export default function AudioMessagePlayer({
               </div>
 
               {/* Botão de Download liberado diretamente para o cliente */}
-              <a
-                href={downloadUrl || audioUrl}
-                download={fileName || 'Audio_Final_Bossa.mp3'}
-                target="_blank"
-                rel="noopener noreferrer"
+              <button
+                type="button"
+                onClick={() => downloadMediaFile(downloadUrl || audioUrl, fileName || 'Audio_Final_Bossa.mp3')}
                 className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold text-xs rounded-lg transition-all flex items-center gap-1.5 shadow-sm shrink-0 cursor-pointer"
                 title="Baixar arquivo final de áudio em alta qualidade"
               >
                 <Download className="w-3.5 h-3.5" />
                 <span>Baixar Áudio</span>
-              </a>
+              </button>
             </div>
           ) : (
             <div className="bg-amber-50/90 border border-amber-200/80 rounded-xl p-2.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">

@@ -281,6 +281,47 @@ app.get('/api/studio/chats/:chatId/deliveries', async (req, res) => {
   }
 });
 
+// 6. EXCLUIR PROJETO DO BANCO TURSO (BOSSA) - Deletar um projeto específico
+app.delete('/api/studio/deliveries/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const client = getTursoClient();
+    await client.execute({
+      sql: 'DELETE FROM studio_deliveries WHERE id = ? OR order_id = ?',
+      args: [id, id]
+    });
+    return res.json({ ok: true, message: 'Projeto de áudio/vídeo excluído do banco Turso com sucesso!' });
+  } catch (err: any) {
+    console.error('Erro ao excluir entrega do Turso:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// 7. LIMPEZA TOTAL DE PROJETOS CONCLUÍDOS / ANTIGOS NO BANCO TURSO (BOSSA)
+app.post('/api/studio/cleanup', async (req, res) => {
+  try {
+    const { mode } = req.body; // 'completed' | 'all'
+    const client = getTursoClient();
+
+    let sql = 'DELETE FROM studio_deliveries WHERE download_unlocked = 1';
+    if (mode === 'all') {
+      sql = 'DELETE FROM studio_deliveries';
+    }
+
+    const result = await client.execute(sql);
+    return res.json({
+      ok: true,
+      affectedRows: result.rowsAffected,
+      message: mode === 'all' 
+        ? 'Todos os projetos foram removidos do banco Turso da Produtora!' 
+        : 'Todos os projetos já entregues e pagos foram removidos do banco Turso!'
+    });
+  } catch (err: any) {
+    console.error('Erro ao limpar banco Turso:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // Start Express with Vite middlewares in Dev
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {

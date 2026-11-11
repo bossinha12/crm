@@ -12,11 +12,11 @@ import {
   Volume2, VolumeX, Sparkles, Copy, Check, CheckSquare,
   Image as ImageIcon, Camera, Loader2, ExternalLink, X, ShieldCheck, Megaphone,
   Upload, CheckCircle, BellRing, PhoneCall, Clock, Mic, Trash2, Music,
-  Lock, Unlock, CheckCircle2, Disc
+  Lock, Unlock, CheckCircle2, Disc, Video, Film, Download
 } from 'lucide-react';
 import { formatMessageDateTime } from '../lib/formatters';
 import { sendPwaPushNotification } from '../lib/notifications';
-import { isBossaStudioCompany, saveStudioDelivery, unlockStudioDownload } from '../lib/studioService';
+import { isBossaStudioCompany, saveStudioDelivery, unlockStudioDownload, deleteStudioDelivery, cleanupStudioDeliveries, downloadMediaFile } from '../lib/studioService';
 import InternalTeamChat from './InternalTeamChat';
 
 interface SellerDashboardProps {
@@ -86,6 +86,11 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
   } = useAudioRecorder();
   const [isUploadingAudio, setIsUploadingAudio] = useState(false);
   const audioFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Video Upload State
+  const [isUploadingVideo, setIsUploadingVideo] = useState(false);
+  const videoFileInputRef = useRef<HTMLInputElement>(null);
+  const [previewVideoUrl, setPreviewVideoUrl] = useState<string | null>(null);
 
   // Keep a synced ref of chats to prevent re-subscriptions in dependent effects
   const chatsRef = useRef<Chat[]>([]);
@@ -849,24 +854,127 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
     }
   };
 
-  // Allow deleting an individual audio message to free database storage
-  const handleDeleteAudioMessage = async (messageId: string) => {
-    if (!selectedChatId) return;
-    if (!confirm('Deseja remover este áudio da conversa?')) return;
+  // Handle Video Upload from PC (MP4, WEBM, MOV, etc.)
+  const handleVideoFileInput = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !selectedChatId) return;
+
+    const isVideoType = file.type.startsWith('video/') || /\.(mp4|webm|mov|mkv|avi)$/i.test(file.name);
+    if (!isVideoType) {
+      setUploadError('Selecione um arquivo de vídeo válido (MP4, WEBM, MOV).');
+      setTimeout(() => setUploadError(null), 4000);
+      return;
+    }
+
+    if (file.size > 80 * 1024 * 1024) {
+      setUploadError('O arquivo de vídeo deve ter no máximo 80MB.');
+      setTimeout(() => setUploadError(null), 4000);
+      return;
+    }
+
+    setIsUploadingVideo(true);
+    setUploadError(null);
+
+    const isStudio = isBossaStudioCompany(company, companyId);
+    const videoLabel = `🎬 ${file.name || 'Vídeo / Produção Audiovisual'}`;
 
     try {
-      const msgDocRef = doc(db, 'companies', companyId, 'chats', selectedChatId, 'messages', messageId);
-      await updateDoc(msgDocRef, {
-        audioUrl: null,
-        text: '🗑️ [Áudio removido pelo Vendedor]'
-      });
+      // Upload via temporary stream host
+      const { audioUrl: videoUrl } = await uploadAudio(file);
+
+      let deliveryId: string | undefined = undefined;
+
+      // Se for a Produtora Bossa: salva o registro no banco de dados Turso (bossa)
+      if (isStudio) {
+        try {
+          const currentChat = chats.find(c => c.id === selectedChatId);
+          const studioRes = await saveStudioDelivery({
+            chatId: selectedChatId,
+            clientName: currentChat?.clientName || 'Cliente',
+            clientPhone: currentChat?.clientPhone,
+            title: `Vídeo: ${file.name}`,
+            mediaType: 'video',
+            previewUrl: videoUrl,
+            previewName: file.name,
+          });
+          deliveryId = studioRes.deliveryId;
+        } catch (tursoErr) {
+          console.warn('Aviso: Não foi possível sincronizar vídeo com Turso:', tursoErr);
+        }
+      }
+
+      // Save message in Firestore
+      const messagesRef = collection(db, 'companies', companyId, 'chats', selectedChatId, 'messages');
+      await addDoc(messagesRef, sanitizeFirestoreData({
+        chatId: selectedChatId,
+        companyId,
+        senderType: 'seller',
+        senderName: sellerUser.name,
+        senderAvatar: sellerAvatar || sellerUser.avatarUrl || null,
+        text: videoLabel,
+        videoUrl,
+        isStudioDelivery: isStudio,
+        deliveryId: deliveryId || null,
+        downloadUnlocked: false,
+        fileName: file.name,
+        createdAt: new Date().toISOString()
+      }));
+
+      const chatDocRef = doc(db, 'companies', companyId, 'chats', selectedChatId);
+      await updateDoc(chatDocRef, sanitizeFirestoreData({
+        lastMessage: isStudio ? `🔒 Prévia Vídeo: ${file.name}` : `🎬 ${file.name}`,
+        lastMessageAt: new Date().toISOString(),
+        lastMessageSender: 'seller',
+        sellerAvatar: sellerAvatar || sellerUser.avatarUrl || null,
+        unreadByClient: true,
+        unreadBySeller: false,
+        updatedAt: new Date().toISOString()
+      }));
     } catch (err) {
-      console.error('Erro ao remover áudio da mensagem:', err);
+      console.error('Erro ao enviar vídeo:', err);
+      setUploadError(err instanceof Error ? err.message : 'Erro ao processar vídeo.');
+      setTimeout(() => setUploadError(null), 4000);
+    } finally {
+      setIsUploadingVideo(false);
+      if (videoFileInputRef.current) videoFileInputRef.current.value = '';
+    }
+  };
+
+  // EXCLUIR PROJETO DO BANCO TURSO & FIRESTORE (Evitar lixo / serviços antigos)
+  const handleDeleteProjectFromDatabase = async (messageId: string, deliveryId?: string) => {
+    if (!selectedChatId) return;
+    if (!confirm('Deseja EXCLUIR este projeto definitivamente do banco de dados Turso e do chat para não acumular lixo/espaço?')) return;
+
+    try {
+      // 1. Deletar do banco Turso bossa
+      if (deliveryId) {
+        await deleteStudioDelivery(deliveryId);
+      }
+
+      // 2. Deletar a mensagem do Firestore
+      const msgDocRef = doc(db, 'companies', companyId, 'chats', selectedChatId, 'messages', messageId);
+      await deleteDoc(msgDocRef);
+
+      alert('Projeto excluído com sucesso do banco de dados Turso e do chat!');
+    } catch (err) {
+      console.error('Erro ao excluir projeto do banco:', err);
+      alert('Erro ao excluir do banco de dados: ' + (err instanceof Error ? err.message : String(err)));
+    }
+  };
+
+  // LIMPEZA EM MASSA DO BANCO TURSO PARA A PRODUTORA
+  const handleCleanupAllCompletedTursoProjects = async () => {
+    if (!confirm('Deseja excluir do banco de dados Turso todos os projetos antigos já ENTREGUES e PAGOS? Isso não afeta o histórico de texto.')) return;
+    try {
+      const res = await cleanupStudioDeliveries('completed');
+      alert(`Limpeza do Turso concluída com sucesso! ${res.message}`);
+    } catch (err) {
+      alert('Erro ao limpar Turso: ' + (err instanceof Error ? err.message : String(err)));
     }
   };
 
   // STUDIO EXCLUSIVE: Liberação de Download (Pago) via Turso bossa
-  const handleUnlockStudioMessage = async (messageId: string, deliveryId?: string) => {
+  const handleUnlockStudioMessage = async (messageId: string, deliveryId?: string, mediaType: 'audio' | 'video' = 'audio') => {
     if (!selectedChatId) return;
     if (!confirm('Confirma que o cliente efetuou o pagamento e deseja LIBERAR o botão de download agora?')) return;
 
@@ -885,13 +993,14 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
 
       // 3. Notificar no chat
       const messagesRef = collection(db, 'companies', companyId, 'chats', selectedChatId, 'messages');
+      const mediaNameText = mediaType === 'video' ? 'vídeo em alta resolução' : 'arquivo de áudio em alta qualidade';
       await addDoc(messagesRef, sanitizeFirestoreData({
         chatId: selectedChatId,
         companyId,
         senderType: 'seller',
         senderName: 'Produtora Bossa',
         senderAvatar: sellerAvatar || sellerUser.avatarUrl || null,
-        text: '🎉 Pagamento confirmado! O seu arquivo de áudio em alta qualidade foi liberado para download acima. Obrigado pela preferência!',
+        text: `🎉 Pagamento confirmado! O seu ${mediaNameText} foi liberado para download acima. Obrigado pela preferência!`,
         createdAt: new Date().toISOString()
       }));
     } catch (err) {
@@ -1391,6 +1500,7 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
                   const isSeller = m.senderType === 'seller';
                   const hasImage = !!m.imageUrl;
                   const hasAudio = !!m.audioUrl;
+                  const hasVideo = !!m.videoUrl;
                   
                   if (isSystem) {
                     return (
@@ -1446,23 +1556,133 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
                         )}
 
                         {hasAudio && (
-                          <AudioMessagePlayer
-                            audioUrl={m.audioUrl!}
-                            duration={m.audioDuration}
-                            isMe={isSeller}
-                            canDelete={true}
-                            onDelete={() => handleDeleteAudioMessage(m.id)}
-                            isStudioDelivery={m.isStudioDelivery}
-                            downloadUnlocked={m.downloadUnlocked}
-                            title={m.text !== '🎤 Mensagem de Voz' ? m.text : undefined}
-                            canUnlock={isSeller && m.isStudioDelivery && !m.downloadUnlocked}
-                            onUnlock={() => handleUnlockStudioMessage(m.id, m.deliveryId)}
-                            downloadUrl={m.downloadUnlocked ? m.audioUrl : null}
-                            fileName={m.fileName || 'Audio_Final_Bossa.mp3'}
-                          />
+                          <div className="space-y-1">
+                            <AudioMessagePlayer
+                              audioUrl={m.audioUrl!}
+                              duration={m.audioDuration}
+                              isMe={isSeller}
+                              canDelete={true}
+                              onDelete={() => handleDeleteProjectFromDatabase(m.id, m.deliveryId)}
+                              isStudioDelivery={Boolean(m.isStudioDelivery || isBossaStudioCompany(company, companyId))}
+                              downloadUnlocked={Boolean(m.downloadUnlocked)}
+                              title={m.text !== '🎤 Mensagem de Voz' ? m.text : undefined}
+                              canUnlock={Boolean(isSeller && !m.downloadUnlocked)}
+                              onUnlock={() => handleUnlockStudioMessage(m.id, m.deliveryId, 'audio')}
+                              downloadUrl={m.downloadUnlocked ? m.audioUrl : null}
+                              fileName={m.fileName || 'Audio_Final_Bossa.mp3'}
+                            />
+                            {/* Botão de Excluir Projeto do Turso para não acumular lixo */}
+                            {isSeller && (m.isStudioDelivery || isBossaStudioCompany(company, companyId)) && (
+                              <div className="flex items-center justify-between pt-1">
+                                {m.downloadUnlocked ? (
+                                  <span className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1">
+                                    <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                                    <span>Projeto Concluído & Pago</span>
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] text-amber-400 font-semibold flex items-center gap-1">
+                                    <Lock className="w-3 h-3 text-amber-400" />
+                                    <span>Aguardando Pagamento</span>
+                                  </span>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteProjectFromDatabase(m.id, m.deliveryId)}
+                                  className="text-[10px] text-slate-300 hover:text-rose-400 bg-slate-900/60 hover:bg-rose-950/60 border border-slate-700 hover:border-rose-800/80 px-2 py-0.5 rounded-md flex items-center gap-1 transition-colors cursor-pointer"
+                                  title="Excluir este projeto do banco de dados Turso para não acumular lixo"
+                                >
+                                  <Trash2 className="w-3 h-3 text-rose-400" />
+                                  <span>Excluir do Turso</span>
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         )}
 
-                        {!hasImage && !hasAudio && m.text}
+                        {hasVideo && (
+                          <div className="space-y-2 min-w-[260px] max-w-sm">
+                            <div className="rounded-xl overflow-hidden bg-black/60 relative border border-slate-700">
+                              <video
+                                src={m.videoUrl}
+                                controls
+                                preload="metadata"
+                                className="w-full max-h-64 object-contain rounded-xl"
+                              />
+                            </div>
+                            
+                            {m.text && (
+                              <p className="text-xs font-semibold px-1">{m.text}</p>
+                            )}
+
+                            {/* STUDIO EXCLUSIVE: Prévia / Liberação de Vídeo */}
+                            {Boolean(m.isStudioDelivery || isBossaStudioCompany(company, companyId)) && (
+                              <div className="pt-1.5 border-t border-slate-700/60">
+                                {m.downloadUnlocked ? (
+                                  <div className="bg-emerald-950/80 border border-emerald-700/80 rounded-xl p-2.5 flex flex-col gap-2">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <div className="flex items-center gap-1.5 truncate">
+                                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                                        <span className="text-xs font-bold text-emerald-200 truncate">Vídeo Aprovado & Pago</span>
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={() => downloadMediaFile(m.videoUrl!, m.fileName || 'Video_Final_Bossa.mp4')}
+                                        className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 shrink-0 transition-colors cursor-pointer"
+                                        title="Baixar vídeo no computador"
+                                      >
+                                        <Download className="w-3.5 h-3.5" />
+                                        <span>Baixar</span>
+                                      </button>
+                                    </div>
+                                    {isSeller && (
+                                      <div className="flex justify-end pt-1 border-t border-emerald-800/40">
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDeleteProjectFromDatabase(m.id, m.deliveryId)}
+                                          className="text-[10px] text-slate-300 hover:text-rose-400 bg-slate-900/60 hover:bg-rose-950/60 border border-slate-700 hover:border-rose-800/80 px-2 py-0.5 rounded-md flex items-center gap-1 transition-colors cursor-pointer"
+                                          title="Excluir este vídeo do banco de dados Turso para não acumular lixo"
+                                        >
+                                          <Trash2 className="w-3 h-3 text-rose-400" />
+                                          <span>Excluir do Turso</span>
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div className="bg-amber-950/80 border border-amber-800/80 rounded-xl p-2.5 flex flex-col gap-2">
+                                    <div className="flex items-center gap-2">
+                                      <Lock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                                      <p className="text-xs text-amber-200">
+                                        Prévia de Vídeo (Download bloqueado até pagamento)
+                                      </p>
+                                    </div>
+                                    <div className="flex items-center justify-between gap-2 pt-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleUnlockStudioMessage(m.id, m.deliveryId, 'video')}
+                                        className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                                      >
+                                        <Unlock className="w-3.5 h-3.5" />
+                                        <span>Liberar Download do Vídeo</span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteProjectFromDatabase(m.id, m.deliveryId)}
+                                        className="text-[10px] text-slate-400 hover:text-rose-400 flex items-center gap-1 transition-colors cursor-pointer"
+                                        title="Excluir do Turso para não acumular lixo"
+                                      >
+                                        <Trash2 className="w-3 h-3 text-rose-400" />
+                                        <span>Excluir</span>
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {!hasImage && !hasAudio && !hasVideo && m.text}
 
                         {/* Date and Time */}
                         {m.createdAt && (
@@ -1529,6 +1749,16 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
                   className="hidden"
                   onChange={handleAudioFileInput}
                   disabled={isUploadingImage || isUploadingAudio}
+                />
+
+                {/* Hidden File Input for Video File Upload */}
+                <input
+                  type="file"
+                  ref={videoFileInputRef}
+                  accept="video/*,.mp4,.webm,.mov,.mkv,.avi"
+                  className="hidden"
+                  onChange={handleVideoFileInput}
+                  disabled={isUploadingImage || isUploadingAudio || isUploadingVideo}
                 />
 
                 {/* Voice recording bar */}
@@ -1601,12 +1831,23 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
                     {/* MP3 / Audio File from PC button */}
                     <button
                       type="button"
-                      disabled={isUploadingImage || isUploadingAudio}
+                      disabled={isUploadingImage || isUploadingAudio || isUploadingVideo}
                       onClick={() => audioFileInputRef.current?.click()}
                       title="Enviar arquivo de áudio ou MP3 do computador"
                       className="p-2.5 text-slate-600 hover:text-purple-600 hover:bg-purple-50 active:bg-purple-100 rounded-xl transition-all flex items-center justify-center shrink-0 border border-slate-200 bg-white cursor-pointer disabled:opacity-50"
                     >
                       <Music className="w-5 h-5 text-purple-600" />
+                    </button>
+
+                    {/* Vídeo / Produção Audiovisual from PC button */}
+                    <button
+                      type="button"
+                      disabled={isUploadingImage || isUploadingAudio || isUploadingVideo}
+                      onClick={() => videoFileInputRef.current?.click()}
+                      title="Enviar arquivo de vídeo (MP4 / WEBM) do computador"
+                      className="p-2.5 text-slate-600 hover:text-cyan-600 hover:bg-cyan-50 active:bg-cyan-100 rounded-xl transition-all flex items-center justify-center shrink-0 border border-slate-200 bg-white cursor-pointer disabled:opacity-50"
+                    >
+                      <Video className="w-5 h-5 text-cyan-600" />
                     </button>
 
                     <input
@@ -1616,9 +1857,11 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
                       onChange={(e) => setCurrentResponse(e.target.value)}
                       placeholder={
                         isUploadingImage 
-                          ? "Enviando imagem ao ImgBB..." 
+                          ? "Enviando imagem..." 
                           : isUploadingAudio 
                           ? "Enviando áudio..." 
+                          : isUploadingVideo
+                          ? "Enviando vídeo ao estúdio..."
                           : "Escreva sua resposta de atendimento..."
                       }
                       className="grow py-2.5 px-4 text-sm text-slate-800 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
@@ -1626,7 +1869,7 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
 
                     <button
                       type="submit"
-                      disabled={isUploadingImage || isUploadingAudio}
+                      disabled={isUploadingImage || isUploadingAudio || isUploadingVideo}
                       className="p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-md shadow-indigo-100 transition-colors flex items-center justify-center shrink-0 cursor-pointer disabled:opacity-50"
                     >
                       <Send className="w-4 h-4" />
@@ -1635,15 +1878,34 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
                 )}
 
                 {isBossaStudioCompany(company, companyId) && (
-                  <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-1.5 flex items-center justify-between text-xs text-amber-800">
+                  <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-2.5 flex flex-wrap items-center justify-between gap-2 text-xs text-amber-800">
                     <span className="flex items-center gap-1.5 font-bold">
                       <Disc className="w-3.5 h-3.5 text-amber-600 animate-spin" style={{ animationDuration: '4s' }} />
-                      <span>Modo Produtora de Áudio Ativo (Banco Turso bossa)</span>
+                      <span>Modo Produtora Ativo (Banco Turso bossa)</span>
                     </span>
-                    <span className="text-[10px] text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full font-semibold">
-                      🔒 Áudios enviados ficam em Prévia até você clicar em Liberar Download
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full font-semibold hidden sm:inline">
+                        🔒 Áudios/Vídeos enviados ficam em Prévia até pagamento
+                      </span>
+                      {/* Botão de Excluir / Limpar Projetos Antigos do Turso */}
+                      <button
+                        type="button"
+                        onClick={handleCleanupAllCompletedTursoProjects}
+                        className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 transition-colors cursor-pointer shadow-xs"
+                        title="Exclui do banco de dados Turso os arquivos de projetos já concluídos para não acumular espaço"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>Limpar Projetos Concluídos do Turso</span>
+                      </button>
+                    </div>
                   </div>
+                )}
+
+                {isUploadingVideo && (
+                  <p className="text-[11px] text-cyan-600 font-medium flex items-center gap-1">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    <span>Enviando vídeo para a prévia... Aguarde.</span>
+                  </p>
                 )}
 
                 {isUploadingAudio && (
