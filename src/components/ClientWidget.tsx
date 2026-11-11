@@ -1136,6 +1136,11 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
                       audioUrl={m.audioUrl!}
                       duration={m.audioDuration}
                       isMe={isMe}
+                      isStudioDelivery={m.isStudioDelivery}
+                      downloadUnlocked={m.downloadUnlocked}
+                      title={m.text !== '🎤 Mensagem de Voz' ? m.text : undefined}
+                      downloadUrl={m.downloadUnlocked ? m.audioUrl : null}
+                      fileName={m.fileName || 'Audio_Final_Bossa.mp3'}
                     />
                   )}
 

@@ -11,10 +11,12 @@ import {
   MessageSquare, User as UserIcon, Send, LogOut, Phone, ShieldClose, 
   Volume2, VolumeX, Sparkles, Copy, Check, CheckSquare,
   Image as ImageIcon, Camera, Loader2, ExternalLink, X, ShieldCheck, Megaphone,
-  Upload, CheckCircle, BellRing, PhoneCall, Clock, Mic, Trash2, Music
+  Upload, CheckCircle, BellRing, PhoneCall, Clock, Mic, Trash2, Music,
+  Lock, Unlock, CheckCircle2, Disc
 } from 'lucide-react';
 import { formatMessageDateTime } from '../lib/formatters';
 import { sendPwaPushNotification } from '../lib/notifications';
+import { isBossaStudioCompany, saveStudioDelivery, unlockStudioDownload } from '../lib/studioService';
 import InternalTeamChat from './InternalTeamChat';
 
 interface SellerDashboardProps {
@@ -782,10 +784,33 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
     setUploadError(null);
 
     const messageText = customLabel || '🎤 Mensagem de Voz';
+    const isStudio = isBossaStudioCompany(company, companyId);
 
     try {
       // 1. Upload to temporary 72h host (0 heavy storage in Firestore!)
       const { audioUrl } = await uploadAudio(fileOrBlob);
+
+      let deliveryId: string | undefined = undefined;
+
+      // 2. Se for a Produtora Bossa: salva o registro no banco de dados Turso (bossa)
+      if (isStudio) {
+        try {
+          const currentChat = chats.find(c => c.id === selectedChatId);
+          const studioRes = await saveStudioDelivery({
+            chatId: selectedChatId,
+            clientName: currentChat?.clientName || 'Cliente',
+            clientPhone: currentChat?.clientPhone,
+            title: customLabel ? `Prévia: ${customLabel.replace(/^[🎤🎵]\s*/, '')}` : 'Prévia de Gravação (Spot / Vinheta)',
+            mediaType: 'audio',
+            previewUrl: audioUrl,
+            previewName: (fileOrBlob instanceof File) ? fileOrBlob.name : 'Previa_Audio.mp3',
+            audioDuration: duration,
+          });
+          deliveryId = studioRes.deliveryId;
+        } catch (tursoErr) {
+          console.warn('Aviso: Não foi possível sincronizar prévia com Turso:', tursoErr);
+        }
+      }
 
       // Save message in Firestore with audio URL only
       const messagesRef = collection(db, 'companies', companyId, 'chats', selectedChatId, 'messages');
@@ -798,12 +823,16 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
         text: messageText,
         audioUrl,
         audioDuration: duration || null,
+        isStudioDelivery: isStudio,
+        deliveryId: deliveryId || null,
+        downloadUnlocked: false,
+        fileName: (fileOrBlob instanceof File) ? fileOrBlob.name : 'Audio_Final.mp3',
         createdAt: new Date().toISOString()
       }));
 
       const chatDocRef = doc(db, 'companies', companyId, 'chats', selectedChatId);
       await updateDoc(chatDocRef, sanitizeFirestoreData({
-        lastMessage: messageText,
+        lastMessage: isStudio ? `🔒 Prévia: ${messageText}` : messageText,
         lastMessageAt: new Date().toISOString(),
         lastMessageSender: 'seller',
         sellerAvatar: sellerAvatar || sellerUser.avatarUrl || null,
@@ -833,6 +862,41 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
       });
     } catch (err) {
       console.error('Erro ao remover áudio da mensagem:', err);
+    }
+  };
+
+  // STUDIO EXCLUSIVE: Liberação de Download (Pago) via Turso bossa
+  const handleUnlockStudioMessage = async (messageId: string, deliveryId?: string) => {
+    if (!selectedChatId) return;
+    if (!confirm('Confirma que o cliente efetuou o pagamento e deseja LIBERAR o botão de download agora?')) return;
+
+    try {
+      // 1. Atualizar no banco de dados Turso (bossa)
+      if (deliveryId) {
+        await unlockStudioDownload(deliveryId, sellerUser.name);
+      }
+
+      // 2. Atualizar em tempo real no Firestore para o cliente ver o botão de download na hora
+      const msgDocRef = doc(db, 'companies', companyId, 'chats', selectedChatId, 'messages', messageId);
+      await updateDoc(msgDocRef, sanitizeFirestoreData({
+        downloadUnlocked: true,
+        unlockedAt: new Date().toISOString()
+      }));
+
+      // 3. Notificar no chat
+      const messagesRef = collection(db, 'companies', companyId, 'chats', selectedChatId, 'messages');
+      await addDoc(messagesRef, sanitizeFirestoreData({
+        chatId: selectedChatId,
+        companyId,
+        senderType: 'seller',
+        senderName: 'Produtora Bossa',
+        senderAvatar: sellerAvatar || sellerUser.avatarUrl || null,
+        text: '🎉 Pagamento confirmado! O seu arquivo de áudio em alta qualidade foi liberado para download acima. Obrigado pela preferência!',
+        createdAt: new Date().toISOString()
+      }));
+    } catch (err) {
+      console.error('Erro ao liberar download de estúdio:', err);
+      alert('Erro ao liberar download: ' + (err instanceof Error ? err.message : String(err)));
     }
   };
 
@@ -1388,6 +1452,13 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
                             isMe={isSeller}
                             canDelete={true}
                             onDelete={() => handleDeleteAudioMessage(m.id)}
+                            isStudioDelivery={m.isStudioDelivery}
+                            downloadUnlocked={m.downloadUnlocked}
+                            title={m.text !== '🎤 Mensagem de Voz' ? m.text : undefined}
+                            canUnlock={isSeller && m.isStudioDelivery && !m.downloadUnlocked}
+                            onUnlock={() => handleUnlockStudioMessage(m.id, m.deliveryId)}
+                            downloadUrl={m.downloadUnlocked ? m.audioUrl : null}
+                            fileName={m.fileName || 'Audio_Final_Bossa.mp3'}
                           />
                         )}
 
@@ -1561,6 +1632,18 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
                       <Send className="w-4 h-4" />
                     </button>
                   </form>
+                )}
+
+                {isBossaStudioCompany(company, companyId) && (
+                  <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-1.5 flex items-center justify-between text-xs text-amber-800">
+                    <span className="flex items-center gap-1.5 font-bold">
+                      <Disc className="w-3.5 h-3.5 text-amber-600 animate-spin" style={{ animationDuration: '4s' }} />
+                      <span>Modo Produtora de Áudio Ativo (Banco Turso bossa)</span>
+                    </span>
+                    <span className="text-[10px] text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full font-semibold">
+                      🔒 Áudios enviados ficam em Prévia até você clicar em Liberar Download
+                    </span>
+                  </div>
                 )}
 
                 {isUploadingAudio && (

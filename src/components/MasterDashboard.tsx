@@ -1710,6 +1710,11 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
                                   isMe={false}
                                   canDelete={true}
                                   onDelete={() => handleDeleteSingleMessageMedia(mirroredChatId || m.chatId, m.id)}
+                                  isStudioDelivery={m.isStudioDelivery}
+                                  downloadUnlocked={m.downloadUnlocked}
+                                  title={m.text !== '🎤 Mensagem de Voz' ? m.text : undefined}
+                                  downloadUrl={m.downloadUnlocked ? m.audioUrl : null}
+                                  fileName={m.fileName || 'Audio_Final_Bossa.mp3'}
                                 />
                               </div>
                             )}

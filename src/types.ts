@@ -43,6 +43,7 @@ export interface Company {
   createdAt: string;
   license?: CompanyLicense;
   operatingHours?: OperatingHours;
+  isStudioMode?: boolean; // When true, enables Bossa Studio exclusive preview/unlock features
 }
 
 export interface User {
@@ -87,6 +88,14 @@ export interface Message {
   imageUrl?: string;
   audioUrl?: string;
   audioDuration?: number; // duration in seconds
+  // Studio Exclusive Delivery / Download Lock properties (Turso bossa integration)
+  deliveryId?: string;
+  isStudioDelivery?: boolean;
+  mediaType?: 'audio' | 'video' | 'flyer' | 'other';
+  downloadUnlocked?: boolean;
+  unlockedAt?: string;
+  fileName?: string;
+  price?: number;
   createdAt: string;
 }
 
