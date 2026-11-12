@@ -979,19 +979,24 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
     if (!confirm('Confirma que o cliente efetuou o pagamento e deseja LIBERAR o botão de download agora?')) return;
 
     try {
-      // 1. Atualizar no banco de dados Turso (bossa)
-      if (deliveryId) {
-        await unlockStudioDownload(deliveryId, sellerUser.name);
-      }
-
-      // 2. Atualizar em tempo real no Firestore para o cliente ver o botão de download na hora
+      // 1. Atualizar em tempo real no Firestore IMEDIATAMENTE (O cliente vê na hora sem F5)
       const msgDocRef = doc(db, 'companies', companyId, 'chats', selectedChatId, 'messages', messageId);
       await updateDoc(msgDocRef, sanitizeFirestoreData({
+        isStudioDelivery: true,
         downloadUnlocked: true,
         unlockedAt: new Date().toISOString()
       }));
 
-      // 3. Notificar no chat
+      // 2. Atualizar documento principal do chat para disparar o ouvinte em tempo real
+      const chatDocRef = doc(db, 'companies', companyId, 'chats', selectedChatId);
+      await updateDoc(chatDocRef, sanitizeFirestoreData({
+        hasUnlockedMedia: true,
+        lastUnlockedMessageId: messageId,
+        lastUnlockedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }));
+
+      // 3. Notificar no chat com mensagem automática
       const messagesRef = collection(db, 'companies', companyId, 'chats', selectedChatId, 'messages');
       const mediaNameText = mediaType === 'video' ? 'vídeo em alta resolução' : 'arquivo de áudio em alta qualidade';
       await addDoc(messagesRef, sanitizeFirestoreData({
@@ -1003,6 +1008,15 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
         text: `🎉 Pagamento confirmado! O seu ${mediaNameText} foi liberado para download acima. Obrigado pela preferência!`,
         createdAt: new Date().toISOString()
       }));
+
+      // 4. Sincronizar no banco Turso bossa de forma resiliente
+      if (deliveryId) {
+        unlockStudioDownload(deliveryId, sellerUser.name).catch(err => {
+          console.warn('Aviso ao sincronizar liberação no Turso:', err);
+        });
+      }
+
+      alert('Download liberado com sucesso! O botão de download já apareceu na tela do cliente sem precisar de F5.');
     } catch (err) {
       console.error('Erro ao liberar download de estúdio:', err);
       alert('Erro ao liberar download: ' + (err instanceof Error ? err.message : String(err)));
@@ -1377,7 +1391,14 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
                 {claimableChats.map((c) => (
                   <div key={c.id} className="p-3 border border-indigo-100 bg-indigo-50/20 rounded-xl flex items-center justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="text-sm font-semibold text-slate-800 truncate">{c.clientName}</p>
+                      <p className="text-sm font-semibold text-slate-800 truncate flex items-center gap-1.5 flex-wrap">
+                        <span>{c.clientName}</span>
+                        {(c.chosenVoice || c.locutor) && (
+                          <span className="text-[10px] bg-purple-100 text-purple-800 px-1.5 py-0.2 rounded font-bold border border-purple-200">
+                            🎙️ {c.chosenVoice || c.locutor}
+                          </span>
+                        )}
+                      </p>
                       <p className="text-[10px] text-slate-400 truncate mt-0.5">{c.lastMessage}</p>
                       {(c.lastMessageAt || c.createdAt) && (
                         <p className="text-[9px] text-indigo-500 font-mono mt-0.5 flex items-center gap-1">
@@ -1427,10 +1448,15 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
                       }`}
                     >
                       <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
                           <span className={`font-bold text-sm truncate ${hasUnreadClientMsg ? 'text-rose-900' : 'text-slate-800'}`}>
                             {c.clientName}
                           </span>
+                          {(c.chosenVoice || c.locutor) && (
+                            <span className="text-[10px] bg-purple-100 text-purple-800 px-1.5 py-0.2 rounded font-bold border border-purple-200">
+                              🎙️ {c.chosenVoice || c.locutor}
+                            </span>
+                          )}
                           {c.clientPhone && (
                             <span className="text-[10px] text-slate-400 shrink-0">({c.clientPhone})</span>
                           )}
@@ -1473,8 +1499,14 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
               {/* Active Conversation header */}
               <div className="bg-slate-50 px-5 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
                 <div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <h3 className="font-bold text-slate-800 text-base">{currentChat?.clientName}</h3>
+                    {(currentChat?.chosenVoice || currentChat?.locutor) && (
+                      <span className="text-xs bg-purple-100 text-purple-800 border border-purple-200 px-2.5 py-0.5 rounded-lg font-bold flex items-center gap-1">
+                        <Mic className="w-3.5 h-3.5 text-purple-600" />
+                        <span>Locutor: {currentChat.chosenVoice || currentChat.locutor}</span>
+                      </span>
+                    )}
                     {currentChat?.clientPhone && (
                       <span className="text-xs bg-slate-200 text-slate-600 px-2 py-0.5 rounded-md font-mono">{currentChat.clientPhone}</span>
                     )}

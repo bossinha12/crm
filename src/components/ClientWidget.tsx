@@ -89,10 +89,45 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
     }
   };
 
+  // Helper to extract voice actor / locutor from URL query parameters (Bossa Mídias site redirect)
+  const getInitialLocutorFromUrl = (): string => {
+    if (typeof window === 'undefined') return '';
+    const params = new URLSearchParams(window.location.search);
+    const raw = params.get('locutor') || 
+                params.get('voz') || 
+                params.get('locutora') || 
+                params.get('voice') || 
+                params.get('speaker');
+    if (!raw) return '';
+    try {
+      return decodeURIComponent(raw.replace(/\+/g, ' ')).trim();
+    } catch (e) {
+      return raw.replace(/\+/g, ' ').trim();
+    }
+  };
+
   // Form Fields for new chat request
+  const [chosenVoice, setChosenVoice] = useState<string>(() => getInitialLocutorFromUrl());
   const [clientName, setClientName] = useState(() => localStorage.getItem('atendepro_client_name') || '');
   const [clientPhone, setClientPhone] = useState('');
-  const [initialMsg, setInitialMsg] = useState('');
+  const [initialMsg, setInitialMsg] = useState(() => {
+    const loc = getInitialLocutorFromUrl();
+    if (loc) {
+      return `Olá! Gostaria de fazer o pedido para gravação com a voz de: ${loc}.\n\nSegue o texto / briefing para a gravação:`;
+    }
+    return '';
+  });
+
+  // Watch for URL query parameter changes if user navigates dynamically
+  useEffect(() => {
+    const loc = getInitialLocutorFromUrl();
+    if (loc && !chosenVoice) {
+      setChosenVoice(loc);
+      if (!initialMsg) {
+        setInitialMsg(`Olá! Gostaria de fazer o pedido para gravação com a voz de: ${loc}.\n\nSegue o texto / briefing para a gravação:`);
+      }
+    }
+  }, []);
 
   // Form Field for actively writing messages
   const [currentMessage, setCurrentMessage] = useState('');
@@ -278,6 +313,9 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
     setLoading(true);
     const newChatId = 'chat_' + Math.random().toString(36).substring(2, 11) + '_' + Date.now().toString().slice(-4);
 
+    const finalVoice = chosenVoice.trim();
+    const finalBriefing = initialMsg.trim();
+
     const generatedChat: Chat = {
       id: newChatId,
       companyId,
@@ -286,14 +324,20 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
       status: ChatStatus.NEW,
       unreadBySeller: true,
       unreadByClient: false,
-      lastMessage: initialMsg.trim() || 'Iniciou o atendimento',
+      chosenVoice: finalVoice || undefined,
+      locutor: finalVoice || undefined,
+      isStudioDelivery: Boolean(finalVoice || isBossaStudioCompany(company, companyId)),
+      lastMessage: finalVoice ? `🎙️ Voz: ${finalVoice} • ${finalBriefing || 'Pedido de gravação'}` : (finalBriefing || 'Iniciou o atendimento'),
       lastMessageAt: new Date().toISOString(),
       lastMessageSender: 'client',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
 
-    const firstMsgText = initialMsg.trim() || 'Olá! Gostaria de iniciar um atendimento comercial.';
+    const firstMsgText = finalVoice 
+      ? `🎙️ **Pedido de Locução - Voz Escolhida: ${finalVoice}**\n\n${finalBriefing || 'Olá! Gostaria de fazer o pedido para gravação com este locutor.'}`
+      : (finalBriefing || 'Olá! Gostaria de iniciar um atendimento comercial.');
+
     const generatedFirstMsg: Message = {
       id: 'msg_first_' + Math.random().toString(36).substring(2, 9),
       chatId: newChatId,
@@ -301,6 +345,9 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
       senderType: 'client',
       senderName: clientName.trim(),
       text: firstMsgText,
+      chosenVoice: finalVoice || undefined,
+      locutor: finalVoice || undefined,
+      isStudioDelivery: Boolean(finalVoice || isBossaStudioCompany(company, companyId)),
       createdAt: new Date().toISOString()
     };
 
@@ -801,6 +848,56 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
               </div>
             </div>
           )}
+          {/* Locutor Selecionado no Site (Bossa Mídias) Banner */}
+          {chosenVoice && (
+            <div className="p-3.5 bg-gradient-to-r from-purple-50 via-indigo-50 to-purple-50 border border-purple-200 rounded-2xl text-purple-950 text-xs flex items-center justify-between gap-3 shadow-xs animate-fade-in">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-purple-600 text-white flex items-center justify-center shrink-0 shadow-sm shadow-purple-200">
+                  <Mic className="w-5 h-5 text-white" />
+                </div>
+                <div className="truncate">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] uppercase font-black text-purple-700 tracking-wider">Locutor Selecionado</span>
+                    <span className="text-[9px] bg-purple-200/80 text-purple-900 font-bold px-1.5 py-0.2 rounded">Bossa Mídias</span>
+                  </div>
+                  <p className="text-sm font-black text-slate-900 truncate mt-0.5">{chosenVoice}</p>
+                </div>
+              </div>
+              <span className="text-[10px] text-purple-700 font-bold bg-white px-2 py-1 rounded-lg border border-purple-200 shrink-0">
+                ✓ Pré-selecionado
+              </span>
+            </div>
+          )}
+
+          {/* Campo de Locutor / Voz Escolhida */}
+          <div className="space-y-1">
+            <label className="text-xs font-bold text-slate-600 uppercase tracking-wider block mb-1 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <Mic className="w-3.5 h-3.5 text-purple-600" />
+                <span>Locutor / Voz Escolhida:</span>
+              </span>
+              {chosenVoice ? (
+                <span className="text-[10px] text-purple-700 font-semibold lowercase">
+                  (capturado do site)
+                </span>
+              ) : (
+                <span className="text-slate-400 font-normal lowercase">(opcional)</span>
+              )}
+            </label>
+            <div className="relative">
+              <input
+                type="text"
+                value={chosenVoice}
+                onChange={(e) => setChosenVoice(e.target.value)}
+                placeholder="Ex: Anderson, Carlos, Mariana, etc."
+                className="w-full text-slate-800 text-sm py-2.5 px-3.5 pl-10 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-600 transition-all font-medium placeholder:text-slate-400"
+              />
+              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-purple-500">
+                <Mic className="w-4 h-4" />
+              </div>
+            </div>
+          </div>
+
           <div className="space-y-1">
             <label className="text-xs font-bold text-slate-600 uppercase tracking-wider block mb-1">
               Como podemos lhe chamar? *
@@ -839,14 +936,19 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs font-bold text-slate-600 uppercase tracking-wider block mb-1">
-              Qual sua dúvida ou solicitação inicial?
+            <label className="text-xs font-bold text-slate-600 uppercase tracking-wider block mb-1 flex items-center justify-between">
+              <span>{chosenVoice ? 'Texto para Gravação / Briefing do Pedido:' : 'Qual sua dúvida ou solicitação inicial?'}</span>
+              {chosenVoice && (
+                <span className="text-[10px] text-purple-700 font-bold bg-purple-50 px-2 py-0.5 rounded-full border border-purple-100">
+                  Briefing do Locutor
+                </span>
+              )}
             </label>
             <textarea
-              rows={2}
+              rows={chosenVoice ? 3 : 2}
               value={initialMsg}
               onChange={(e) => setInitialMsg(e.target.value)}
-              placeholder="Digite aqui o que você precisa..."
+              placeholder={chosenVoice ? "Cole ou digite aqui o texto que o locutor deverá gravar (ou tire dúvidas sobre prazos e valores)..." : "Digite aqui o que você precisa..."}
               className="w-full text-slate-800 text-sm p-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 transition-all placeholder:text-slate-400 resize-none"
             />
           </div>
@@ -925,7 +1027,7 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
           </div>
 
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <h3 className="font-bold text-sm tracking-tight text-white flex items-center gap-1.5">
                 <span>{activeChat?.sellerName ? activeChat.sellerName : companyName}</span>
                 {activeChat?.sellerName && (
@@ -935,6 +1037,12 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
                   </span>
                 )}
               </h3>
+              {(activeChat?.chosenVoice || activeChat?.locutor || chosenVoice) && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-purple-500/40 text-purple-100 border border-purple-400/40">
+                  <Mic className="w-3 h-3 text-purple-300" />
+                  <span>Voz: {activeChat?.chosenVoice || activeChat?.locutor || chosenVoice}</span>
+                </span>
+              )}
               <span className="text-[10px] bg-slate-800 text-slate-200 border border-slate-700 font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wider">
                 ID: {chatId.replace('chat_', '').slice(0, 5)}
               </span>
@@ -1134,20 +1242,22 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
                   )}
 
                   {hasAudio && (
-                    <AudioMessagePlayer
-                      audioUrl={m.audioUrl!}
-                      duration={m.audioDuration}
-                      isMe={isMe}
-                      isStudioDelivery={Boolean(m.isStudioDelivery || isBossaStudioCompany(company, companyId))}
-                      downloadUnlocked={Boolean(m.downloadUnlocked)}
-                      title={m.text !== '🎤 Mensagem de Voz' ? m.text : undefined}
-                      downloadUrl={m.downloadUnlocked ? m.audioUrl : null}
-                      fileName={m.fileName || 'Audio_Final_Bossa.mp3'}
-                    />
+                    <div key={`audio-${m.id}-${m.downloadUnlocked ? 'unlocked' : 'locked'}`}>
+                      <AudioMessagePlayer
+                        audioUrl={m.audioUrl!}
+                        duration={m.audioDuration}
+                        isMe={isMe}
+                        isStudioDelivery={Boolean(m.isStudioDelivery || m.deliveryId || m.downloadUnlocked || isBossaStudioCompany(company, companyId) || activeChat?.isStudioDelivery || activeChat?.hasUnlockedMedia || activeChat?.chosenVoice || activeChat?.locutor)}
+                        downloadUnlocked={Boolean(m.downloadUnlocked)}
+                        title={m.text !== '🎤 Mensagem de Voz' ? m.text : undefined}
+                        downloadUrl={m.downloadUnlocked ? m.audioUrl : null}
+                        fileName={m.fileName || 'Audio_Final_Bossa.mp3'}
+                      />
+                    </div>
                   )}
 
                   {hasVideo && (
-                    <div className="space-y-2 min-w-[240px] max-w-sm">
+                    <div key={`video-${m.id}-${m.downloadUnlocked ? 'unlocked' : 'locked'}`} className="space-y-2 min-w-[240px] max-w-sm">
                       <div className="rounded-xl overflow-hidden bg-black/60 relative border border-slate-200">
                         <video
                           src={m.videoUrl}
@@ -1162,7 +1272,7 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
                       )}
 
                       {/* STUDIO EXCLUSIVE: Prévia / Download de Vídeo para o Cliente */}
-                      {Boolean(m.isStudioDelivery || isBossaStudioCompany(company, companyId)) && (
+                      {Boolean(m.isStudioDelivery || m.deliveryId || m.downloadUnlocked || isBossaStudioCompany(company, companyId) || activeChat?.isStudioDelivery || activeChat?.hasUnlockedMedia || activeChat?.chosenVoice || activeChat?.locutor) && (
                         <div className="pt-1.5 border-t border-slate-200/80">
                           {m.downloadUnlocked ? (
                             <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 flex items-center justify-between gap-2 shadow-xs">

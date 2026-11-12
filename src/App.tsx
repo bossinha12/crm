@@ -67,7 +67,12 @@ export default function App() {
     const t = target.toLowerCase().trim();
     const idLower = (c.id || '').toLowerCase();
     const slugLower = (c.slug || '').toLowerCase();
-    return (
+    const nameLower = (c.name || '').toLowerCase();
+    const nameClean = nameLower.replace(/[^a-z0-9]/g, '');
+    const targetClean = t.replace(/[^a-z0-9]/g, '');
+    const slugClean = slugLower.replace(/[^a-z0-9]/g, '');
+
+    if (
       idLower === t ||
       slugLower === t ||
       idLower === `company_${t}` ||
@@ -75,7 +80,16 @@ export default function App() {
       idLower.replace(/^company_/, '') === t.replace(/^company_/, '') ||
       (t === 'atendepro_default' && idLower === 'atendepro_default') ||
       (t === 'larissamoveis' && (idLower === 'atendepro_default' || slugLower === 'larissamoveis'))
-    );
+    ) {
+      return true;
+    }
+
+    // Match Bossa Infor Produtora via bossainforprodutora or variations
+    if (targetClean && (nameClean === targetClean || slugClean === targetClean)) return true;
+    if (targetClean.includes('bossa') && (nameClean.includes('bossa') || slugClean.includes('bossa'))) return true;
+    if (targetClean.includes('produtora') && nameClean.includes('produtora')) return true;
+
+    return false;
   };
 
   const previousCompanyParamRef = useRef(getCompanyIdentifierFromUrl().toLowerCase());

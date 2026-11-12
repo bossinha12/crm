@@ -73,6 +73,12 @@ export interface Chat {
   lastMessageSender?: 'client' | 'seller';
   unreadBySeller?: boolean;
   unreadByClient?: boolean;
+  chosenVoice?: string; // Locutor ou voz escolhida vindo do site de demonstrações
+  locutor?: string;
+  isStudioDelivery?: boolean;
+  hasUnlockedMedia?: boolean;
+  lastUnlockedMessageId?: string;
+  lastUnlockedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -90,6 +96,8 @@ export interface Message {
   audioDuration?: number; // duration in seconds
   videoUrl?: string;
   videoDuration?: number; // duration in seconds
+  chosenVoice?: string;
+  locutor?: string;
   // Studio Exclusive Delivery / Download Lock properties (Turso bossa integration)
   deliveryId?: string;
   isStudioDelivery?: boolean;

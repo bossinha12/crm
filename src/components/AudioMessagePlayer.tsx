@@ -3,6 +3,7 @@ import { Play, Pause, Volume2, Trash2, Download, AlertCircle, Lock, Unlock, Chec
 import { downloadMediaFile } from '../lib/studioService';
 
 interface AudioMessagePlayerProps {
+  key?: React.Key;
   audioUrl: string;
   duration?: number;
   isMe?: boolean;
@@ -37,6 +38,11 @@ export default function AudioMessagePlayer({
   const [duration, setDuration] = useState(initialDuration || 0);
   const [playbackRate, setPlaybackRate] = useState<number>(1);
   const [isError, setIsError] = useState(false);
+  const [isUnlocked, setIsUnlocked] = useState(Boolean(downloadUnlocked));
+
+  useEffect(() => {
+    setIsUnlocked(Boolean(downloadUnlocked));
+  }, [downloadUnlocked]);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -253,7 +259,7 @@ export default function AudioMessagePlayer({
       {/* STUDIO EXCLUSIVE: Prévia / Liberação de Download (Banco Turso bossa) */}
       {isStudioDelivery && (
         <div className="mt-2 pt-2 border-t border-slate-200/70 dark:border-slate-700/70 flex flex-col gap-1.5">
-          {downloadUnlocked ? (
+          {(isUnlocked || downloadUnlocked) ? (
             <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 flex items-center justify-between gap-2 shadow-xs">
               <div className="flex items-center gap-2 min-w-0">
                 <div className="w-7 h-7 rounded-lg bg-emerald-500 text-white flex items-center justify-center shrink-0">
