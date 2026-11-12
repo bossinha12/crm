@@ -640,28 +640,11 @@ export default function App() {
           } : undefined} 
         />
 
-        {/* Discreet Super Admin & Seller Login links at bottom */}
-        <div className="mt-4 flex flex-wrap items-center justify-center gap-3 text-center">
-          <button
-            onClick={() => {
-              navigate({ view: 'vendedor' }, companyId === 'atendepro_default' ? 'master_login' : 'vendedor');
-            }}
-            className="text-xs text-slate-500 hover:text-indigo-600 transition-colors font-semibold cursor-pointer flex items-center gap-1.5 bg-white/90 hover:bg-white px-3.5 py-1.5 rounded-full border border-slate-200/90 shadow-sm"
-          >
-            <LogIn className="w-3.5 h-3.5 text-indigo-600" />
-            <span>Área Comercial (Vendedor / Dono)</span>
-          </button>
-
-          <button
-            onClick={() => {
-              window.history.pushState({}, '', '?view=superadmin');
-              setIsSuperAdminView(true);
-            }}
-            className="text-[11px] text-slate-400 hover:text-slate-600 transition-colors font-medium cursor-pointer"
-          >
-            🔒 Gerenciador de Licenças
-          </button>
-        </div>
+        {/* Rodapé Oficial Protegido - Acessos administrativos ocultos para o cliente final */}
+        <footer className="mt-5 text-center text-xs text-slate-400 font-medium select-none flex items-center justify-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+          <span>Produto Oficial Bossa Infor</span>
+        </footer>
       </main>
     );
   }
