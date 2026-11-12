@@ -109,7 +109,18 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
   // Form Fields for new chat request
   const [chosenVoice, setChosenVoice] = useState<string>(() => getInitialLocutorFromUrl());
   const [clientName, setClientName] = useState(() => localStorage.getItem('atendepro_client_name') || '');
-  const [clientPhone, setClientPhone] = useState('');
+  const [clientPhone, setClientPhone] = useState(() => localStorage.getItem('atendepro_client_phone') || '');
+
+  // Helper de formatação de telefone / WhatsApp com DDD
+  const formatPhoneNumber = (value: string): string => {
+    const digits = value.replace(/\D/g, '').slice(0, 11);
+    if (digits.length <= 2) return digits.length ? `(${digits}` : '';
+    if (digits.length <= 6) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+    if (digits.length <= 10) {
+      return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+    }
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7, 11)}`;
+  };
   const [initialMsg, setInitialMsg] = useState(() => {
     const loc = getInitialLocutorFromUrl();
     if (loc) {
@@ -308,7 +319,17 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
 
   const handleStartChat = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!clientName.trim()) return;
+    const cleanPhoneDigits = (clientPhone || '').replace(/\D/g, '');
+
+    if (!clientName.trim()) {
+      alert('Por favor, informe seu nome para iniciar o atendimento.');
+      return;
+    }
+
+    if (!clientPhone.trim() || cleanPhoneDigits.length < 10) {
+      alert('O número de WhatsApp com DDD é obrigatório para darmos andamento ao seu atendimento. Por favor, digite seu número completo.');
+      return;
+    }
 
     setLoading(true);
     const newChatId = 'chat_' + Math.random().toString(36).substring(2, 11) + '_' + Date.now().toString().slice(-4);
@@ -320,7 +341,7 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
       id: newChatId,
       companyId,
       clientName: clientName.trim(),
-      clientPhone: clientPhone.trim() || "",
+      clientPhone: clientPhone.trim(),
       status: ChatStatus.NEW,
       unreadBySeller: true,
       unreadByClient: false,
@@ -356,15 +377,15 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
     localStorage.setItem(`atendepro_backup_msgs_${newChatId}`, JSON.stringify([generatedFirstMsg]));
     localStorage.setItem(`atendepro_client_chat_id`, newChatId);
     localStorage.setItem('atendepro_client_name', clientName.trim());
+    localStorage.setItem('atendepro_client_phone', clientPhone.trim());
 
     // Prepare lead record for marketing / promotions
-    const cleanPhoneDigits = (clientPhone || '').replace(/\D/g, '');
     const leadDocId = cleanPhoneDigits ? `lead_${cleanPhoneDigits}` : `lead_${newChatId}`;
     const leadRecord: Lead = {
       id: leadDocId,
       companyId,
       name: clientName.trim(),
-      phone: clientPhone.trim() || 'Não informado',
+      phone: clientPhone.trim(),
       firstContactAt: new Date().toISOString(),
       lastContactAt: new Date().toISOString(),
       lastMessage: initialMsg.trim() || 'Iniciou o atendimento',
@@ -899,8 +920,14 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs font-bold text-slate-600 uppercase tracking-wider block mb-1">
-              Como podemos lhe chamar? *
+            <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <User className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Como podemos lhe chamar? *</span>
+              </span>
+              <span className="text-[10px] text-rose-600 bg-rose-50 border border-rose-200 px-2 py-0.2 rounded-full font-bold">
+                Obrigatório
+              </span>
             </label>
             <div className="relative">
               <input
@@ -909,7 +936,7 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
                 value={clientName}
                 onChange={(e) => setClientName(e.target.value)}
                 placeholder="Seu nome completo ou apelido"
-                className="w-full text-slate-800 text-sm py-2.5 px-3.5 pl-10 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 transition-all placeholder:text-slate-400"
+                className="w-full text-slate-800 text-sm py-2.5 px-3.5 pl-10 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 transition-all font-medium placeholder:text-slate-400"
               />
               <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                 <User className="w-4 h-4" />
@@ -918,21 +945,31 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs font-bold text-slate-600 uppercase tracking-wider block mb-1">
-              WhatsApp / Telefone <span className="text-slate-400 font-normal lowercase">(opcional)</span>
+            <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <Phone className="w-3.5 h-3.5 text-indigo-600" />
+                <span>WhatsApp / Celular com DDD *</span>
+              </span>
+              <span className="text-[10px] text-rose-600 bg-rose-50 border border-rose-200 px-2 py-0.2 rounded-full font-bold">
+                Obrigatório
+              </span>
             </label>
             <div className="relative">
               <input
                 type="tel"
+                required
                 value={clientPhone}
-                onChange={(e) => setClientPhone(e.target.value)}
-                placeholder="Ex: (85) 98765-4321"
-                className="w-full text-slate-800 text-sm py-2.5 px-3.5 pl-10 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 transition-all placeholder:text-slate-400"
+                onChange={(e) => setClientPhone(formatPhoneNumber(e.target.value))}
+                placeholder="(85) 98765-4321"
+                className="w-full text-slate-800 text-sm py-2.5 px-3.5 pl-10 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 transition-all font-medium placeholder:text-slate-400"
               />
               <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                 <Phone className="w-4 h-4" />
               </div>
             </div>
+            <p className="text-[11px] text-slate-500 pt-0.5">
+              📱 Necessário para envio de prévias, confirmação e contato direto pelo WhatsApp.
+            </p>
           </div>
 
           <div className="space-y-1">
