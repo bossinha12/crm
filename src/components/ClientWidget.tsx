@@ -911,7 +911,7 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
                 value={chosenVoice}
                 onChange={(e) => setChosenVoice(e.target.value)}
                 placeholder="Ex: Anderson, Carlos, Mariana, etc."
-                className="w-full text-slate-800 text-sm py-2.5 px-3.5 pl-10 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-600 transition-all font-medium placeholder:text-slate-400"
+                className="w-full text-slate-800 text-base sm:text-sm py-2.5 px-3.5 pl-10 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-600 transition-all font-medium placeholder:text-slate-400"
               />
               <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-purple-500">
                 <Mic className="w-4 h-4" />
@@ -936,7 +936,7 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
                 value={clientName}
                 onChange={(e) => setClientName(e.target.value)}
                 placeholder="Seu nome completo ou apelido"
-                className="w-full text-slate-800 text-sm py-2.5 px-3.5 pl-10 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 transition-all font-medium placeholder:text-slate-400"
+                className="w-full text-slate-800 text-base sm:text-sm py-2.5 px-3.5 pl-10 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 transition-all font-medium placeholder:text-slate-400"
               />
               <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                 <User className="w-4 h-4" />
@@ -961,7 +961,7 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
                 value={clientPhone}
                 onChange={(e) => setClientPhone(formatPhoneNumber(e.target.value))}
                 placeholder="(85) 98765-4321"
-                className="w-full text-slate-800 text-sm py-2.5 px-3.5 pl-10 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 transition-all font-medium placeholder:text-slate-400"
+                className="w-full text-slate-800 text-base sm:text-sm py-2.5 px-3.5 pl-10 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 transition-all font-medium placeholder:text-slate-400"
               />
               <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                 <Phone className="w-4 h-4" />
@@ -986,7 +986,7 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
               value={initialMsg}
               onChange={(e) => setInitialMsg(e.target.value)}
               placeholder={chosenVoice ? "Cole ou digite aqui o texto que o locutor deverá gravar (ou tire dúvidas sobre prazos e valores)..." : "Digite aqui o que você precisa..."}
-              className="w-full text-slate-800 text-sm p-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 transition-all placeholder:text-slate-400 resize-none"
+              className="w-full text-slate-800 text-base sm:text-sm p-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 transition-all placeholder:text-slate-400 resize-none"
             />
           </div>
 
@@ -1029,10 +1029,10 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
 
   // Active Live Chat widget structure
   return (
-    <div className="max-w-2xl w-full bg-slate-50 rounded-2xl border border-slate-200 shadow-xl overflow-hidden h-[630px] flex flex-col transition-all duration-300">
+    <div className="max-w-2xl w-full bg-slate-50 rounded-2xl border border-slate-200 shadow-xl overflow-hidden h-[calc(100dvh-70px)] min-h-[460px] sm:h-[630px] flex flex-col transition-all duration-300">
       
       {/* Active Conversation Header */}
-      <div className="bg-gradient-to-r from-indigo-700 via-indigo-600 to-slate-900 text-white px-5 py-3.5 shrink-0 flex items-center justify-between shadow-md relative">
+      <div className="bg-gradient-to-r from-indigo-700 via-indigo-600 to-slate-900 text-white px-3.5 py-3 sm:px-5 sm:py-3.5 shrink-0 flex items-center justify-between gap-2 shadow-md relative">
         <div className="flex items-center gap-3">
           
           {/* Seller / Store Avatar Profile */}
@@ -1201,7 +1201,7 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
       )}
 
       {/* Messages Scroll Area */}
-      <div ref={clientMessagesContainerRef} className="grow overflow-y-auto p-5 space-y-4 bg-slate-50/50" id="messages-stream">
+      <div ref={clientMessagesContainerRef} className="grow overflow-y-auto p-3 sm:p-5 space-y-3.5 sm:space-y-4 bg-slate-50/50" id="messages-stream">
         
         {/* Welcome indicator */}
         <div className="text-center py-2 text-xs text-slate-400">
@@ -1378,7 +1378,7 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
 
       {/* Active Messaging input footer */}
       {activeChat?.status !== ChatStatus.CLOSED && (
-        <div className="bg-slate-50 border-t border-slate-200 p-3 shrink-0">
+        <div className="bg-slate-50 border-t border-slate-200 p-2.5 sm:p-3 shrink-0">
           {/* Hidden File Input for ImgBB Upload */}
           <input
             type="file"
@@ -1439,66 +1439,85 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
               </button>
             </div>
           ) : (
-            <form onSubmit={handleSendMessage} className="flex items-center gap-2">
-              {/* Photo / Image attach button */}
-              <button
-                type="button"
-                disabled={isUploadingImage || isUploadingAudio}
-                onClick={() => imageInputRef.current?.click()}
-                title="Enviar foto do celular ou computador (ImgBB)"
-                className="p-2.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 active:bg-indigo-100 rounded-xl transition-all flex items-center justify-center shrink-0 border border-slate-200 bg-white cursor-pointer disabled:opacity-50"
-              >
-                {isUploadingImage ? (
-                  <Loader2 className="w-5 h-5 text-indigo-600 animate-spin" />
-                ) : (
-                  <Camera className="w-5 h-5" />
-                )}
-              </button>
+            <form onSubmit={handleSendMessage} className="flex flex-col gap-2">
+              {/* Linha 1: Campo de digitação em largura total + Botão Enviar */}
+              <div className="flex items-end gap-2 w-full">
+                <textarea
+                  rows={2}
+                  required
+                  value={currentMessage}
+                  onChange={(e) => setCurrentMessage(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      if (currentMessage.trim()) {
+                        handleSendMessage(e as any);
+                      }
+                    }
+                  }}
+                  placeholder={
+                    isUploadingImage 
+                      ? "Enviando imagem..." 
+                      : isUploadingAudio 
+                      ? "Enviando áudio..." 
+                      : "Digite sua mensagem..."
+                  }
+                  className="w-full min-w-0 flex-1 py-2 px-3.5 text-base sm:text-sm text-slate-800 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 resize-none leading-snug"
+                />
 
-              {/* Microphone / Record Audio button */}
-              <button
-                type="button"
-                disabled={isUploadingImage || isUploadingAudio}
-                onClick={startRecording}
-                title="Gravar mensagem de voz no microfone"
-                className="p-2.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 active:bg-rose-100 rounded-xl transition-all flex items-center justify-center shrink-0 border border-slate-200 bg-white cursor-pointer disabled:opacity-50"
-              >
-                <Mic className="w-5 h-5 text-rose-500" />
-              </button>
+                <button
+                  type="submit"
+                  disabled={isUploadingImage || isUploadingAudio}
+                  title="Enviar mensagem"
+                  className="h-[46px] px-3.5 sm:px-4 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white rounded-xl shadow-md shadow-indigo-100 transition-colors flex items-center justify-center gap-1.5 shrink-0 cursor-pointer disabled:opacity-50 font-bold text-xs"
+                >
+                  <Send className="w-4 h-4" />
+                  <span className="hidden sm:inline">Enviar</span>
+                </button>
+              </div>
 
-              {/* MP3 / Audio File from Computer or Phone */}
-              <button
-                type="button"
-                disabled={isUploadingImage || isUploadingAudio}
-                onClick={() => audioFileInputRef.current?.click()}
-                title="Enviar arquivo de áudio ou MP3 do computador/celular"
-                className="p-2.5 text-slate-500 hover:text-purple-600 hover:bg-purple-50 active:bg-purple-100 rounded-xl transition-all flex items-center justify-center shrink-0 border border-slate-200 bg-white cursor-pointer disabled:opacity-50"
-              >
-                <Music className="w-5 h-5 text-purple-600" />
-              </button>
+              {/* Linha 2: Botões de mídia abaixo para não espremer a caixa de texto em telas pequenas */}
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {/* Photo / Image attach button */}
+                <button
+                  type="button"
+                  disabled={isUploadingImage || isUploadingAudio}
+                  onClick={() => imageInputRef.current?.click()}
+                  title="Enviar foto do celular ou computador (ImgBB)"
+                  className="px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 active:bg-indigo-100 rounded-xl transition-all flex items-center gap-1.5 shrink-0 border border-slate-200 bg-white cursor-pointer disabled:opacity-50"
+                >
+                  {isUploadingImage ? (
+                    <Loader2 className="w-4 h-4 text-indigo-600 animate-spin" />
+                  ) : (
+                    <Camera className="w-4 h-4 text-indigo-600" />
+                  )}
+                  <span>Foto</span>
+                </button>
 
-              <input
-                type="text"
-                required
-                value={currentMessage}
-                onChange={(e) => setCurrentMessage(e.target.value)}
-                placeholder={
-                  isUploadingImage 
-                    ? "Enviando imagem..." 
-                    : isUploadingAudio 
-                    ? "Enviando áudio..." 
-                    : "Digite sua mensagem..."
-                }
-                className="grow py-2.5 px-3.5 text-sm text-slate-800 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
-              />
+                {/* Microphone / Record Audio button */}
+                <button
+                  type="button"
+                  disabled={isUploadingImage || isUploadingAudio}
+                  onClick={startRecording}
+                  title="Gravar mensagem de voz no microfone"
+                  className="px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:text-rose-600 hover:bg-rose-50 active:bg-rose-100 rounded-xl transition-all flex items-center gap-1.5 shrink-0 border border-slate-200 bg-white cursor-pointer disabled:opacity-50"
+                >
+                  <Mic className="w-4 h-4 text-rose-500" />
+                  <span>Voz</span>
+                </button>
 
-              <button
-                type="submit"
-                disabled={isUploadingImage || isUploadingAudio}
-                className="p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-md shadow-indigo-100 transition-colors flex items-center justify-center shrink-0 cursor-pointer disabled:opacity-50"
-              >
-                <Send className="w-4 h-4" />
-              </button>
+                {/* MP3 / Audio File from Computer or Phone */}
+                <button
+                  type="button"
+                  disabled={isUploadingImage || isUploadingAudio}
+                  onClick={() => audioFileInputRef.current?.click()}
+                  title="Enviar arquivo de áudio ou MP3 do computador/celular"
+                  className="px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:text-purple-600 hover:bg-purple-50 active:bg-purple-100 rounded-xl transition-all flex items-center gap-1.5 shrink-0 border border-slate-200 bg-white cursor-pointer disabled:opacity-50"
+                >
+                  <Music className="w-4 h-4 text-purple-600" />
+                  <span>MP3 / Áudio</span>
+                </button>
+              </div>
             </form>
           )}
 

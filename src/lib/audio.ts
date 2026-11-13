@@ -338,6 +338,53 @@ class CRMAlarm {
       console.warn("Message chime error:", e);
     }
   }
+
+  /**
+   * Distinct gentle chat-pop effect for when an active client (already in attendance) sends a reply.
+   * Does NOT loop and sounds completely different from the new-customer queue call alarm.
+   */
+  public playClientReplySound() {
+    if (this.isMuted) return;
+    try {
+      const currentCtx = this.ensureContext();
+      if (!currentCtx) return;
+      if (currentCtx.state === 'suspended') {
+        currentCtx.resume();
+      }
+      const t = currentCtx.currentTime;
+
+      // Soft double-pop chat reply sound (C5 -> F5 -> A5 quick warm marimba tap)
+      const notes = [
+        { freq: 523.25, delay: 0, duration: 0.14, peak: 0.18 },    // C5
+        { freq: 698.46, delay: 0.09, duration: 0.18, peak: 0.22 }, // F5
+      ];
+
+      notes.forEach(({ freq, delay, duration, peak }) => {
+        const osc = currentCtx.createOscillator();
+        const gain = currentCtx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, t + delay);
+        osc.frequency.exponentialRampToValueAtTime(freq * 1.04, t + delay + duration * 0.6);
+
+        gain.gain.setValueAtTime(0.001, t + delay);
+        gain.gain.linearRampToValueAtTime(peak, t + delay + 0.018);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + delay + duration);
+
+        osc.connect(gain);
+        gain.connect(currentCtx.destination);
+        osc.start(t + delay);
+        osc.stop(t + delay + duration + 0.02);
+      });
+
+      try {
+        if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+          navigator.vibrate(90);
+        }
+      } catch (e) {}
+    } catch (e) {
+      console.warn("Client reply sound error:", e);
+    }
+  }
 }
 
 export const crmAlarm = new CRMAlarm();

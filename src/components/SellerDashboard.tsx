@@ -94,7 +94,9 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
 
   // Keep a synced ref of chats to prevent re-subscriptions in dependent effects
   const chatsRef = useRef<Chat[]>([]);
-  const prevAlertCountRef = useRef(0);
+  const prevNewWaitingCountRef = useRef(0);
+  const notifiedReplyTimestampsRef = useRef<Map<string, string>>(new Map());
+  const hasLoadedChatsOnceRef = useRef(false);
   useEffect(() => {
     chatsRef.current = chats;
   }, [chats]);
@@ -122,9 +124,12 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
         c.unreadBySeller && 
         c.lastMessageSender === 'client'
       );
-      if (hasUnassignedNew || hasUnreadClientMsg) {
+      if (hasUnassignedNew) {
         setAlarmIsSounding(true);
         crmAlarm.start();
+      } else if (hasUnreadClientMsg) {
+        setAlarmIsSounding(false);
+        crmAlarm.playClientReplySound();
       }
     } else {
       crmAlarm.stop();
@@ -151,25 +156,27 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
 
     const unsub = onSnapshot(chatsCollectionRef, (snapshot) => {
       const list: Chat[] = [];
-      let pendingAlertCount = 0;
+      let newWaitingCount = 0;
+      const myUnreadReplies: Chat[] = [];
 
       snapshot.forEach((d) => {
         const item = { id: d.id, ...d.data() } as Chat;
         list.push(item);
 
-        // 1. Unassigned new chat waiting for any seller to claim:
+        // 1. APENAS chamados novos sem atendente disparam o alarme em loop:
         if (item.status === ChatStatus.NEW) {
-          pendingAlertCount++;
+          newWaitingCount++;
         }
 
-        // 2. Active chat assigned to this seller with unread message from the external client:
+        // 2. Cliente JÁ em atendimento com ESTE vendedor que mandou resposta:
+        //    Nunca dispara o alarme de novo atendimento e nunca aparece para outro atendente.
         if (
           item.status === ChatStatus.ACTIVE &&
           item.sellerId === sellerUser.id &&
           item.unreadBySeller === true &&
           item.lastMessageSender === 'client'
         ) {
-          pendingAlertCount++;
+          myUnreadReplies.push(item);
         }
       });
 
@@ -182,15 +189,14 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
 
       setAvailableChats(list);
 
-      // Sound management rules: Alarm rings in loop if there are pending unassigned calls OR unread client messages
-      if (pendingAlertCount > 0) {
+      // A) Alarme em loop SOMENTE para novos clientes aguardando na fila (status === NEW)
+      if (newWaitingCount > 0) {
         if (!crmAlarm.getMuted()) {
           setAlarmIsSounding(true);
           crmAlarm.start();
         }
 
-        // Trigger native mobile notification if a new client or message arrived
-        if (pendingAlertCount > prevAlertCountRef.current) {
+        if (newWaitingCount > prevNewWaitingCountRef.current) {
           const newChat = list.find(c => c.status === ChatStatus.NEW);
           const callerName = newChat?.clientName || 'Novo Cliente';
           const storeName = company?.name || 'Sua Loja';
@@ -205,7 +211,48 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
         setAlarmIsSounding(false);
         crmAlarm.stop();
       }
-      prevAlertCountRef.current = pendingAlertCount;
+      prevNewWaitingCountRef.current = newWaitingCount;
+
+      // B) Som distinto e único (sem loop!) quando um cliente JÁ em atendimento responde mensagem
+      let hasNewActiveReply = false;
+      let latestReplyChat: Chat | null = null;
+      const activeIdsWithUnread = new Set<string>();
+
+      myUnreadReplies.forEach((replyChat) => {
+        activeIdsWithUnread.add(replyChat.id);
+        const msgStamp = replyChat.lastMessageAt || replyChat.updatedAt || '1';
+        const prevStamp = notifiedReplyTimestampsRef.current.get(replyChat.id);
+
+        if (prevStamp !== msgStamp) {
+          notifiedReplyTimestampsRef.current.set(replyChat.id, msgStamp);
+          if (hasLoadedChatsOnceRef.current) {
+            hasNewActiveReply = true;
+            latestReplyChat = replyChat;
+          }
+        }
+      });
+
+      // Limpar registros de chats que já foram lidos ou encerrados
+      notifiedReplyTimestampsRef.current.forEach((_stamp: string, cId: string) => {
+        if (!activeIdsWithUnread.has(cId)) {
+          notifiedReplyTimestampsRef.current.delete(cId);
+        }
+      });
+
+      if (hasNewActiveReply && latestReplyChat) {
+        if (!crmAlarm.getMuted()) {
+          crmAlarm.playClientReplySound();
+        }
+        const replyTarget = latestReplyChat as Chat;
+        sendPwaPushNotification(`💬 ${replyTarget.clientName} respondeu no seu atendimento`, {
+          body: replyTarget.lastMessage || 'Enviou uma nova mensagem no chat em andamento.',
+          tag: `atendepro-reply-${replyTarget.id}`,
+          renotify: true,
+          companyLogo: company?.logoUrl || undefined
+        });
+      }
+
+      hasLoadedChatsOnceRef.current = true;
     }, (error) => {
       console.warn("Aviso ao carregar chats do Firestore em tempo real (usando contingência):", error);
     });
@@ -1252,8 +1299,8 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
         </div>
       )}
 
-      {/* Active Sound Loop Alert Banner for Incoming External Client Calls/Messages */}
-      {alarmIsSounding && totalPendingAttention > 0 && (
+      {/* Active Sound Loop Alert Banner ONLY for NEW Unassigned Clients in Queue */}
+      {alarmIsSounding && claimableChats.length > 0 && (
         <div className="bg-gradient-to-r from-rose-600 via-amber-600 to-rose-600 bg-[length:200%_auto] text-white rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-xl shadow-rose-600/30 border-2 border-rose-300 animate-pulse">
           <div className="flex items-center gap-3.5">
             <div className="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center shrink-0 animate-bounce">
@@ -1262,44 +1309,30 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-[10px] uppercase font-black px-2.5 py-0.5 rounded-full bg-white text-rose-700 tracking-wider">
-                  Alarme Sonoro em Loop
+                  Novo Chamado na Fila
                 </span>
                 <span className="text-xs font-bold text-rose-100 flex items-center gap-1.5">
                   <Volume2 className="w-3.5 h-3.5 animate-ping" /> Chamando sem parar
                 </span>
               </div>
               <p className="text-sm font-extrabold text-white mt-1">
-                {claimableChats.length > 0 && `${claimableChats.length} novo(s) cliente(s) aguardando na fila.`}
-                {claimableChats.length > 0 && unreadClientChats.length > 0 && ' • '}
-                {unreadClientChats.length > 0 && `${unreadClientChats.length} cliente(s) com mensagem não atendida.`}
+                {claimableChats.length} novo(s) cliente(s) aguardando atendimento.
                 <span className="text-xs font-normal text-rose-100 block sm:inline sm:ml-2">
-                  (O alarme só para quando você atender ou abrir o chat)
+                  (O alarme só para quando você assumir o chamado)
                 </span>
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2 w-full sm:w-auto shrink-0 justify-end">
-            {claimableChats.length > 0 && (
-              <button
-                type="button"
-                onClick={() => handleClaimChat(claimableChats[0])}
-                className="px-4 py-2 bg-white text-rose-700 hover:bg-rose-50 text-xs font-black rounded-xl transition-all shadow-md active:scale-95 cursor-pointer flex items-center gap-1.5"
-              >
-                <PhoneCall className="w-4 h-4" />
-                <span>Atender Chamado Agora</span>
-              </button>
-            )}
-            {claimableChats.length === 0 && unreadClientChats.length > 0 && (
-              <button
-                type="button"
-                onClick={() => handleSelectChat(unreadClientChats[0].id)}
-                className="px-4 py-2 bg-white text-rose-700 hover:bg-rose-50 text-xs font-black rounded-xl transition-all shadow-md active:scale-95 cursor-pointer flex items-center gap-1.5"
-              >
-                <MessageSquare className="w-4 h-4" />
-                <span>Abrir Mensagem ({unreadClientChats[0].clientName})</span>
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => handleClaimChat(claimableChats[0])}
+              className="px-4 py-2 bg-white text-rose-700 hover:bg-rose-50 text-xs font-black rounded-xl transition-all shadow-md active:scale-95 cursor-pointer flex items-center gap-1.5"
+            >
+              <PhoneCall className="w-4 h-4" />
+              <span>Atender Chamado Agora</span>
+            </button>
             <button
               type="button"
               onClick={toggleSound}
@@ -1310,6 +1343,41 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
               <span>Silenciar</span>
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Calm Notification Banner for Replies from Clients ALREADY in Active Attendance with THIS Seller (No looping call alarm) */}
+      {claimableChats.length === 0 && unreadClientChats.length > 0 && (
+        <div className="bg-gradient-to-r from-sky-600 to-indigo-600 text-white rounded-2xl p-3.5 px-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-md shadow-indigo-600/20 border border-sky-400/50">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center shrink-0">
+              <MessageSquare className="w-5 h-5 text-white" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[10px] uppercase font-extrabold px-2 py-0.5 rounded-full bg-white text-indigo-700 tracking-wider">
+                  Resposta no Seu Atendimento
+                </span>
+                <span className="text-[11px] text-sky-100 font-medium">
+                  Em andamento exclusivo com você
+                </span>
+              </div>
+              <p className="text-xs sm:text-sm font-bold text-white mt-0.5 truncate">
+                {unreadClientChats.length === 1
+                  ? `${unreadClientChats[0].clientName} respondeu: "${unreadClientChats[0].lastMessage}"`
+                  : `${unreadClientChats.length} clientes em andamento responderam suas mensagens`}
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => handleSelectChat(unreadClientChats[0].id)}
+            className="px-3.5 py-2 bg-white text-indigo-700 hover:bg-indigo-50 text-xs font-black rounded-xl transition-all shadow-sm active:scale-95 cursor-pointer flex items-center gap-1.5 shrink-0 self-end sm:self-center"
+          >
+            <MessageSquare className="w-3.5 h-3.5" />
+            <span>Ver Mensagem ({unreadClientChats[0].clientName})</span>
+          </button>
         </div>
       )}
 
@@ -1491,42 +1559,43 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
         </div>
 
         {/* Selected Chat Box Feed console (Lg: col-span-8) */}
-        <div className="lg:col-span-8 bg-white border border-slate-100 rounded-2xl shadow-xl flex flex-col h-[580px] overflow-hidden">
+        <div className="lg:col-span-8 bg-white border border-slate-100 rounded-2xl shadow-xl flex flex-col h-[calc(100dvh-160px)] min-h-[480px] lg:h-[600px] overflow-hidden">
           
           {selectedChatId ? (
             <div className="flex flex-col h-full grow shrink-0 min-h-0">
               
               {/* Active Conversation header */}
-              <div className="bg-slate-50 px-5 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
-                <div>
+              <div className="bg-slate-50 px-3.5 py-3 sm:px-5 sm:py-4 border-b border-slate-100 flex items-center justify-between gap-2 shrink-0">
+                <div className="min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="font-bold text-slate-800 text-base">{currentChat?.clientName}</h3>
+                    <h3 className="font-bold text-slate-800 text-sm sm:text-base truncate">{currentChat?.clientName}</h3>
                     {(currentChat?.chosenVoice || currentChat?.locutor) && (
-                      <span className="text-xs bg-purple-100 text-purple-800 border border-purple-200 px-2.5 py-0.5 rounded-lg font-bold flex items-center gap-1">
-                        <Mic className="w-3.5 h-3.5 text-purple-600" />
+                      <span className="text-[11px] sm:text-xs bg-purple-100 text-purple-800 border border-purple-200 px-2 py-0.5 rounded-lg font-bold flex items-center gap-1">
+                        <Mic className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-purple-600" />
                         <span>Locutor: {currentChat.chosenVoice || currentChat.locutor}</span>
                       </span>
                     )}
                     {currentChat?.clientPhone && (
-                      <span className="text-xs bg-slate-200 text-slate-600 px-2 py-0.5 rounded-md font-mono">{currentChat.clientPhone}</span>
+                      <span className="text-[11px] sm:text-xs bg-slate-200 text-slate-600 px-2 py-0.5 rounded-md font-mono">{currentChat.clientPhone}</span>
                     )}
                   </div>
-                  <p className="text-xs text-slate-400 mt-0.5">Tempo real • Conversando com você</p>
+                  <p className="text-[11px] sm:text-xs text-slate-400 mt-0.5">Tempo real • Conversando com você</p>
                 </div>
 
-                <div>
+                <div className="shrink-0">
                   <button
                     onClick={handleCloseChat}
-                    className="text-xs bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 px-4 py-2 rounded-xl font-bold flex items-center gap-1.5 transition-colors"
+                    className="text-[11px] sm:text-xs bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 px-2.5 py-1.5 sm:px-4 sm:py-2 rounded-xl font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
                   >
                     <ShieldClose className="w-3.5 h-3.5" />
-                    <span>Concluir Chamado</span>
+                    <span className="hidden xs:inline sm:inline">Concluir Chamado</span>
+                    <span className="xs:hidden sm:hidden">Concluir</span>
                   </button>
                 </div>
               </div>
 
               {/* Messages Body */}
-              <div ref={sellerMessagesContainerRef} className="grow overflow-y-auto p-5 space-y-4" id="messages-panel">
+              <div ref={sellerMessagesContainerRef} className="grow overflow-y-auto p-3 sm:p-5 space-y-3.5 sm:space-y-4" id="messages-panel">
                 {selectedChatMessages.map((m) => {
                   const isSystem = m.senderName === 'Sistema';
                   const isSeller = m.senderType === 'seller';
@@ -1744,7 +1813,7 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
               )}
 
               {/* Quick Template Answers and Field response inputs */}
-              <div className="p-4 bg-slate-50 border-t border-slate-200 shrink-0 space-y-3">
+              <div className="p-2.5 sm:p-4 bg-slate-50 border-t border-slate-200 shrink-0 space-y-2.5">
                 
                 {/* Scrollable replies badges */}
                 <div className="flex items-center gap-2 overflow-x-auto text-[11px] py-1 border-b border-slate-200 pb-2">
@@ -1833,79 +1902,95 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
                     </button>
                   </div>
                 ) : (
-                  <form onSubmit={handleSendResponse} className="flex items-center gap-2">
-                    {/* Camera / Image Upload Button */}
-                    <button
-                      type="button"
-                      disabled={isUploadingImage || isUploadingAudio}
-                      onClick={() => imageInputRef.current?.click()}
-                      title="Enviar foto do produto (hospedada no ImgBB)"
-                      className="p-2.5 text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 active:bg-indigo-100 rounded-xl transition-all flex items-center justify-center shrink-0 border border-slate-200 bg-white cursor-pointer disabled:opacity-50"
-                    >
-                      {isUploadingImage ? (
-                        <Loader2 className="w-5 h-5 text-indigo-600 animate-spin" />
-                      ) : (
-                        <Camera className="w-5 h-5" />
-                      )}
-                    </button>
+                  <form onSubmit={handleSendResponse} className="flex flex-col gap-2">
+                    {/* Row 1: Full-width responsive typing field + Send button (readable on small phones) */}
+                    <div className="flex items-end gap-2 w-full">
+                      <textarea
+                        rows={2}
+                        required
+                        value={currentResponse}
+                        onChange={(e) => setCurrentResponse(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            if (currentResponse.trim()) {
+                              handleSendResponse(e as any);
+                            }
+                          }
+                        }}
+                        placeholder={
+                          isUploadingImage 
+                            ? "Enviando imagem..." 
+                            : isUploadingAudio 
+                            ? "Enviando áudio..." 
+                            : isUploadingVideo
+                            ? "Enviando vídeo ao estúdio..."
+                            : "Escreva sua resposta de atendimento..."
+                        }
+                        className="w-full min-w-0 flex-1 py-2 px-3.5 text-base sm:text-sm text-slate-800 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 resize-none leading-snug"
+                      />
 
-                    {/* Microphone button (Record voice) */}
-                    <button
-                      type="button"
-                      disabled={isUploadingImage || isUploadingAudio}
-                      onClick={startRecording}
-                      title="Gravar resposta em áudio no microfone"
-                      className="p-2.5 text-slate-600 hover:text-rose-600 hover:bg-rose-50 active:bg-rose-100 rounded-xl transition-all flex items-center justify-center shrink-0 border border-slate-200 bg-white cursor-pointer disabled:opacity-50"
-                    >
-                      <Mic className="w-5 h-5 text-rose-500" />
-                    </button>
+                      <button
+                        type="submit"
+                        disabled={isUploadingImage || isUploadingAudio || isUploadingVideo}
+                        title="Enviar resposta"
+                        className="h-[46px] px-3.5 sm:px-4 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white rounded-xl shadow-md shadow-indigo-100 transition-colors flex items-center justify-center gap-1.5 shrink-0 cursor-pointer disabled:opacity-50 font-bold text-xs"
+                      >
+                        <Send className="w-4 h-4" />
+                        <span className="hidden sm:inline">Enviar</span>
+                      </button>
+                    </div>
 
-                    {/* MP3 / Audio File from PC button */}
-                    <button
-                      type="button"
-                      disabled={isUploadingImage || isUploadingAudio || isUploadingVideo}
-                      onClick={() => audioFileInputRef.current?.click()}
-                      title="Enviar arquivo de áudio ou MP3 do computador"
-                      className="p-2.5 text-slate-600 hover:text-purple-600 hover:bg-purple-50 active:bg-purple-100 rounded-xl transition-all flex items-center justify-center shrink-0 border border-slate-200 bg-white cursor-pointer disabled:opacity-50"
-                    >
-                      <Music className="w-5 h-5 text-purple-600" />
-                    </button>
+                    {/* Row 2: Media upload & recording buttons neatly arranged without squeezing the text box */}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <button
+                        type="button"
+                        disabled={isUploadingImage || isUploadingAudio}
+                        onClick={() => imageInputRef.current?.click()}
+                        title="Enviar foto do produto (hospedada no ImgBB)"
+                        className="px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 active:bg-indigo-100 rounded-xl transition-all flex items-center gap-1.5 shrink-0 border border-slate-200 bg-white cursor-pointer disabled:opacity-50"
+                      >
+                        {isUploadingImage ? (
+                          <Loader2 className="w-4 h-4 text-indigo-600 animate-spin" />
+                        ) : (
+                          <Camera className="w-4 h-4 text-indigo-600" />
+                        )}
+                        <span>Foto</span>
+                      </button>
 
-                    {/* Vídeo / Produção Audiovisual from PC button */}
-                    <button
-                      type="button"
-                      disabled={isUploadingImage || isUploadingAudio || isUploadingVideo}
-                      onClick={() => videoFileInputRef.current?.click()}
-                      title="Enviar arquivo de vídeo (MP4 / WEBM) do computador"
-                      className="p-2.5 text-slate-600 hover:text-cyan-600 hover:bg-cyan-50 active:bg-cyan-100 rounded-xl transition-all flex items-center justify-center shrink-0 border border-slate-200 bg-white cursor-pointer disabled:opacity-50"
-                    >
-                      <Video className="w-5 h-5 text-cyan-600" />
-                    </button>
+                      <button
+                        type="button"
+                        disabled={isUploadingImage || isUploadingAudio}
+                        onClick={startRecording}
+                        title="Gravar resposta em áudio no microfone"
+                        className="px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:text-rose-600 hover:bg-rose-50 active:bg-rose-100 rounded-xl transition-all flex items-center gap-1.5 shrink-0 border border-slate-200 bg-white cursor-pointer disabled:opacity-50"
+                      >
+                        <Mic className="w-4 h-4 text-rose-500" />
+                        <span>Voz</span>
+                      </button>
 
-                    <input
-                      type="text"
-                      required
-                      value={currentResponse}
-                      onChange={(e) => setCurrentResponse(e.target.value)}
-                      placeholder={
-                        isUploadingImage 
-                          ? "Enviando imagem..." 
-                          : isUploadingAudio 
-                          ? "Enviando áudio..." 
-                          : isUploadingVideo
-                          ? "Enviando vídeo ao estúdio..."
-                          : "Escreva sua resposta de atendimento..."
-                      }
-                      className="grow py-2.5 px-4 text-sm text-slate-800 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
-                    />
+                      <button
+                        type="button"
+                        disabled={isUploadingImage || isUploadingAudio || isUploadingVideo}
+                        onClick={() => audioFileInputRef.current?.click()}
+                        title="Enviar arquivo de áudio ou MP3 do computador"
+                        className="px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:text-purple-600 hover:bg-purple-50 active:bg-purple-100 rounded-xl transition-all flex items-center gap-1.5 shrink-0 border border-slate-200 bg-white cursor-pointer disabled:opacity-50"
+                      >
+                        <Music className="w-4 h-4 text-purple-600" />
+                        <span>MP3 / Áudio</span>
+                      </button>
 
-                    <button
-                      type="submit"
-                      disabled={isUploadingImage || isUploadingAudio || isUploadingVideo}
-                      className="p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-md shadow-indigo-100 transition-colors flex items-center justify-center shrink-0 cursor-pointer disabled:opacity-50"
-                    >
-                      <Send className="w-4 h-4" />
-                    </button>
+                      <button
+                        type="button"
+                        disabled={isUploadingImage || isUploadingAudio || isUploadingVideo}
+                        onClick={() => videoFileInputRef.current?.click()}
+                        title="Enviar arquivo de vídeo (MP4 / WEBM) do computador"
+                        className="px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:text-cyan-600 hover:bg-cyan-50 active:bg-cyan-100 rounded-xl transition-all flex items-center gap-1.5 shrink-0 border border-slate-200 bg-white cursor-pointer disabled:opacity-50"
+                      >
+                        <Video className="w-4 h-4 text-cyan-600" />
+                        <span>Vídeo</span>
+                      </button>
+                    </div>
                   </form>
                 )}
 

@@ -558,7 +558,7 @@ export default function App() {
   // 3. Render Logged-In CRM consoles (Master or Seller)
   if (currentUser) {
     return (
-      <main className="min-h-screen bg-slate-100 flex flex-col p-4 sm:p-6 lg:p-8 font-sans">
+      <main className="min-h-screen bg-slate-100 flex flex-col p-2 sm:p-6 lg:p-8 font-sans">
         <div className="max-w-7xl w-full mx-auto flex-1 flex flex-col select-none">
           {currentUser.role === 'admin' ? (
             <MasterDashboard 
@@ -629,7 +629,7 @@ export default function App() {
     const hasPortalAccess = params.get('portal') === 'true';
 
     return (
-      <main className="min-h-screen bg-slate-100 flex flex-col justify-center items-center p-4 font-sans leading-relaxed relative">
+      <main className="min-h-screen bg-slate-100 flex flex-col justify-center items-center p-2 sm:p-4 font-sans leading-relaxed relative">
         <ClientWidget 
           companyId={companyId} 
           companyName={currentCompanyName} 
