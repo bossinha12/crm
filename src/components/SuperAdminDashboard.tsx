@@ -134,7 +134,7 @@ export default function SuperAdminDashboard({
 
     const companiesColRef = collection(db, 'companies');
     const unsub = onSnapshot(companiesColRef, async (snapshot) => {
-      const list: Company[] = [];
+      const rawList: Company[] = [];
 
       snapshot.forEach((d) => {
         const c = { id: d.id, ...d.data() } as Company;
@@ -161,7 +161,28 @@ export default function SuperAdminDashboard({
           }
         }
 
-        list.push(c);
+        rawList.push(c);
+      });
+
+      const validList = rawList.filter(c => Boolean(c.name && c.name.trim()));
+      const ghostList = rawList.filter(c => !c.name || !c.name.trim());
+
+      // Migrate operatingHours from ghost docs onto real companies and clean up ghost docs
+      const list = validList.map(vc => {
+        const ghost = ghostList.find(gc => {
+          const gId = (gc.id || '').toLowerCase();
+          const vSlug = (vc.slug || '').toLowerCase();
+          const vIdClean = (vc.id || '').toLowerCase().replace(/^company_/, '');
+          return gId === vSlug || gId === vIdClean || (vc.id === 'atendepro_default' && gId === 'atendimento');
+        });
+        if (ghost) {
+          if (ghost.operatingHours && !vc.operatingHours) {
+            vc = { ...vc, operatingHours: ghost.operatingHours };
+            setDoc(doc(db, 'companies', vc.id), { operatingHours: ghost.operatingHours }, { merge: true }).catch(() => {});
+          }
+          deleteDoc(doc(db, 'companies', ghost.id)).catch(() => {});
+        }
+        return vc;
       });
 
       // If database is completely empty, initialize master company once
@@ -687,7 +708,7 @@ export default function SuperAdminDashboard({
 
   // Filtered List
   const filteredCompanies = companies.filter(c => {
-    const matchesSearch = c.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    const matchesSearch = (c.name || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
                           (c.slug || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
                           (c.adminName || '').toLowerCase().includes(searchTerm.toLowerCase());
     

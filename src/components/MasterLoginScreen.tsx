@@ -135,15 +135,24 @@ export default function MasterLoginScreen({
         
         {/* Header Branding */}
         <div className="text-center space-y-3">
-          <div className="mx-auto w-16 h-16 rounded-2xl bg-indigo-950 border border-indigo-700/50 flex items-center justify-center shadow-inner shadow-indigo-500/20">
-            <Sparkles className="w-8 h-8 text-indigo-400" />
+          <div className="mx-auto w-16 h-16 rounded-2xl bg-indigo-950 border border-indigo-700/50 overflow-hidden flex items-center justify-center shadow-inner shadow-indigo-500/20">
+            {company?.logoUrl ? (
+              <img
+                src={company.logoUrl}
+                referrerPolicy="no-referrer"
+                alt={company.name || 'Logo'}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <Sparkles className="w-8 h-8 text-indigo-400" />
+            )}
           </div>
           <div>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-              Painel Master
+              {company?.name ? company.name : 'Painel Master'}
             </h1>
             <p className="text-sm text-slate-400 mt-1 font-medium">
-              Atendimento Online • Gestão Administrativa
+              {company?.name ? 'Painel Master • Gestão Administrativa' : 'Atendimento Online • Gestão Administrativa'}
             </p>
           </div>
         </div>

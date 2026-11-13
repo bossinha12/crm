@@ -34,7 +34,7 @@ export default function App() {
     if (cachedCompStr) {
       try {
         const parsed = JSON.parse(cachedCompStr) as Company;
-        if (parsed?.id) return parsed.id;
+        if (parsed?.id && parsed?.name?.trim()) return parsed.id;
       } catch (e) {}
     }
     return getCompanyIdentifierFromUrl();
@@ -46,7 +46,8 @@ export default function App() {
                           localStorage.getItem(`crm_cached_company_company_${targetParam}`);
     if (cachedCompStr) {
       try {
-        return JSON.parse(cachedCompStr) as Company;
+        const parsed = JSON.parse(cachedCompStr) as Company;
+        if (parsed?.name?.trim()) return parsed;
       } catch (e) {}
     }
     return null;
@@ -318,16 +319,36 @@ export default function App() {
         // Listen to companies collection in real time
         const companiesColRef = collection(db, 'companies');
         unsubscribeCompanies = onSnapshot(companiesColRef, (snapshot) => {
-          const fetchedCompanies: Company[] = [];
+          const rawCompanies: Company[] = [];
           snapshot.forEach((d) => {
-            fetchedCompanies.push({ id: d.id, ...d.data() } as Company);
+            rawCompanies.push({ id: d.id, ...d.data() } as Company);
+          });
+
+          // Ignore incomplete/ghost docs (e.g., docs created with only { operatingHours } by slug)
+          const validCompanies = rawCompanies.filter(c => Boolean(c.name && c.name.trim()));
+          const ghostCompanies = rawCompanies.filter(c => !c.name || !c.name.trim());
+
+          // Merge any operatingHours from ghost docs into the real company document
+          const fetchedCompanies = validCompanies.map(vc => {
+            const matchingGhost = ghostCompanies.find(gc => {
+              const gId = (gc.id || '').toLowerCase();
+              const vSlug = (vc.slug || '').toLowerCase();
+              const vIdClean = (vc.id || '').toLowerCase().replace(/^company_/, '');
+              return gId === vSlug || gId === vIdClean || (vc.id === 'atendepro_default' && gId === 'atendimento');
+            });
+            if (matchingGhost?.operatingHours && !vc.operatingHours) {
+              const merged = { ...vc, operatingHours: matchingGhost.operatingHours };
+              setDoc(doc(db, 'companies', vc.id), { operatingHours: matchingGhost.operatingHours }, { merge: true }).catch(() => {});
+              return merged;
+            }
+            return vc;
           });
 
           setAllCompaniesList(fetchedCompanies);
 
           const targetParam = getCompanyIdentifierFromUrl().toLowerCase();
           
-          // Match company by slug, exact ID, or company_{slug}
+          // Match company by slug, exact ID, or company_{slug} strictly among valid companies
           let matched = fetchedCompanies.find(c => matchesCompany(c, targetParam));
 
           // Check fallback in localStorage
@@ -335,7 +356,7 @@ export default function App() {
             const savedLocal = localStorage.getItem('crm_local_companies');
             if (savedLocal) {
               try {
-                const parsed = JSON.parse(savedLocal) as Company[];
+                const parsed = (JSON.parse(savedLocal) as Company[]).filter(c => Boolean(c.name && c.name.trim()));
                 matched = parsed.find(c => matchesCompany(c, targetParam));
               } catch (e) {}
             }
@@ -410,7 +431,7 @@ export default function App() {
           let matched: Company | undefined;
           if (savedLocal) {
             try {
-              const parsed = JSON.parse(savedLocal) as Company[];
+              const parsed = (JSON.parse(savedLocal) as Company[]).filter(c => Boolean(c.name && c.name.trim()));
               matched = parsed.find(c => matchesCompany(c, targetParam));
             } catch (e) {}
           }

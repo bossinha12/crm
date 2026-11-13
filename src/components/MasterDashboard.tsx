@@ -88,15 +88,30 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
 
     const activeCompId = liveCompany?.id || companyId;
     const altCompId = liveCompany?.slug || companyId.replace(/^company_/, '');
-    const idsToUpdate = Array.from(new Set([activeCompId, altCompId, companyId])).filter(Boolean);
 
-    for (const cId of idsToUpdate) {
-      try {
-        await setDoc(doc(db, 'companies', cId), sanitizeFirestoreData({
-          operatingHours: newOperatingHours
-        }), { merge: true });
-      } catch (e) {}
-    }
+    try {
+      await setDoc(doc(db, 'companies', activeCompId), sanitizeFirestoreData({
+        operatingHours: newOperatingHours
+      }), { merge: true });
+
+      // Remove any accidental partial ghost document without name so it never shadows the real company
+      if (altCompId && altCompId !== activeCompId) {
+        try {
+          const { getDoc } = await import('firebase/firestore');
+          const altSnap = await getDoc(doc(db, 'companies', altCompId));
+          if (altSnap.exists()) {
+            const altData = altSnap.data();
+            if (!altData?.name) {
+              await deleteDoc(doc(db, 'companies', altCompId));
+            } else {
+              await setDoc(doc(db, 'companies', altCompId), sanitizeFirestoreData({
+                operatingHours: newOperatingHours
+              }), { merge: true });
+            }
+          }
+        } catch (e) {}
+      }
+    } catch (e) {}
 
     setLiveCompany(prev => prev ? { ...prev, operatingHours: newOperatingHours } : null);
     setOpHoursSaving(false);
@@ -1219,8 +1234,8 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
     printWindow.document.close();
   };
 
-  const currentLogo = company?.logoUrl || '';
-  const currentName = company?.name || 'Atendimento Online';
+  const currentLogo = liveCompany?.logoUrl || company?.logoUrl || '';
+  const currentName = liveCompany?.name || company?.name || 'Atendimento Online';
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();

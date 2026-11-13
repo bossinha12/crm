@@ -26,6 +26,14 @@ interface ClientWidgetProps {
 }
 
 export default function ClientWidget({ companyId, companyName, companyLogo, company, onGoBack }: ClientWidgetProps) {
+  const effectiveCompanyName = (company?.name?.trim() || companyName || 'Atendimento Online').trim();
+  const effectiveCompanyLogo = (companyLogo?.trim() || company?.logoUrl?.trim() || '').trim();
+  const [logoFailed, setLogoFailed] = useState(false);
+
+  useEffect(() => {
+    setLogoFailed(false);
+  }, [effectiveCompanyLogo]);
+
   const [chatId, setChatId] = useState<string | null>(localStorage.getItem(`atendepro_client_chat_id`));
   const [activeChat, setActiveChat] = useState<Chat | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -814,11 +822,19 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
           <div className="absolute -left-6 -bottom-6 w-24 h-24 rounded-full bg-white/5 pointer-events-none"></div>
           
           <div className="relative z-10 flex flex-col items-center">
-            <div className="w-16 h-16 rounded-2xl border-2 border-white/20 overflow-hidden bg-white/10 backdrop-blur-md shadow-lg flex items-center justify-center mb-3">
-              {companyLogo ? (
-                <img src={companyLogo} referrerPolicy="no-referrer" alt={`${companyName} Logo`} className="w-full h-full object-cover" />
+            <div className="w-20 h-20 rounded-2xl border-2 border-white/25 overflow-hidden bg-white/10 backdrop-blur-md shadow-xl flex items-center justify-center mb-3">
+              {effectiveCompanyLogo && !logoFailed ? (
+                <img
+                  src={effectiveCompanyLogo}
+                  referrerPolicy="no-referrer"
+                  alt={`${effectiveCompanyName} Logo`}
+                  onError={() => setLogoFailed(true)}
+                  className="w-full h-full object-cover"
+                />
               ) : (
-                <MessageSquare className="w-8 h-8 text-white" />
+                <span className="text-2xl font-black tracking-tight text-white">
+                  {effectiveCompanyName.slice(0, 2).toUpperCase()}
+                </span>
               )}
             </div>
 
@@ -839,7 +855,7 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
                 Atendimento Online
               </span>
             )}
-            <h2 className="text-2xl font-extrabold text-white tracking-tight">{companyName}</h2>
+            <h2 className="text-2xl font-extrabold text-white tracking-tight">{effectiveCompanyName}</h2>
             <p className="text-xs text-indigo-100/90 mt-1 max-w-xs leading-relaxed">
               Inicie uma conversa em tempo real com nossa equipe de suporte e vendas
             </p>
@@ -1032,12 +1048,50 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
     <div className="max-w-2xl w-full bg-slate-50 rounded-2xl border border-slate-200 shadow-xl overflow-hidden h-[calc(100dvh-70px)] min-h-[460px] sm:h-[630px] flex flex-col transition-all duration-300">
       
       {/* Active Conversation Header */}
-      <div className="bg-gradient-to-r from-indigo-700 via-indigo-600 to-slate-900 text-white px-3.5 py-3 sm:px-5 sm:py-3.5 shrink-0 flex items-center justify-between gap-2 shadow-md relative">
-        <div className="flex items-center gap-3">
-          
+      <div className="bg-gradient-to-r from-indigo-700 via-indigo-600 to-slate-900 text-white shrink-0 shadow-md relative">
+        {/* Company Brand Bar (Always shows Company Logo + Name even when seller joins) */}
+        <div className="px-3.5 py-2 sm:px-5 bg-black/20 border-b border-white/10 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-6 h-6 rounded-lg overflow-hidden bg-white/15 border border-white/25 flex items-center justify-center shrink-0">
+              {effectiveCompanyLogo && !logoFailed ? (
+                <img
+                  src={effectiveCompanyLogo}
+                  referrerPolicy="no-referrer"
+                  alt={effectiveCompanyName}
+                  onError={() => setLogoFailed(true)}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <span className="text-[10px] font-black text-white">
+                  {effectiveCompanyName.slice(0, 2).toUpperCase()}
+                </span>
+              )}
+            </div>
+            <span className="text-xs font-extrabold tracking-wide text-white truncate">
+              {effectiveCompanyName}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="text-[10px] bg-slate-800/80 text-slate-200 border border-white/15 font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
+              ID: {chatId.replace('chat_', '').slice(0, 5)}
+            </span>
+            <button
+              onClick={clearChatSession}
+              title="Encerrar e abrir outro chamado"
+              className="text-[11px] bg-black/25 hover:bg-black/40 px-2.5 py-1 rounded-lg text-white font-semibold flex items-center gap-1 transition-colors border border-white/15 cursor-pointer shadow-sm"
+            >
+              <XCircle className="w-3.5 h-3.5 text-rose-300" />
+              <span className="hidden sm:inline">Novo Chamado</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Seller / Status Info Row */}
+        <div className="px-3.5 py-2.5 sm:px-5 sm:py-3 flex items-center gap-3">
           {/* Seller / Store Avatar Profile */}
           <div className="relative shrink-0">
-            <div className="w-11 h-11 rounded-full bg-white/10 flex items-center justify-center border-2 border-white/30 overflow-hidden shadow-inner bg-slate-800">
+            <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-white/10 flex items-center justify-center border-2 border-white/30 overflow-hidden shadow-inner bg-slate-800">
               {(resolvedSellerAvatar || activeChat?.sellerAvatar) ? (
                 <img 
                   src={resolvedSellerAvatar || activeChat?.sellerAvatar || ''} 
@@ -1045,15 +1099,16 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
                   alt={activeChat?.sellerName || 'Atendente'} 
                   className="w-full h-full object-cover" 
                 />
-              ) : companyLogo ? (
+              ) : effectiveCompanyLogo && !logoFailed ? (
                 <img 
-                  src={companyLogo} 
+                  src={effectiveCompanyLogo} 
                   referrerPolicy="no-referrer" 
-                  alt={companyName} 
+                  alt={effectiveCompanyName} 
+                  onError={() => setLogoFailed(true)}
                   className="w-full h-full object-cover" 
                 />
               ) : (
-                <User className="w-6 h-6 text-indigo-200" />
+                <User className="w-5 h-5 text-indigo-200" />
               )}
             </div>
 
@@ -1063,10 +1118,10 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
             </span>
           </div>
 
-          <div>
+          <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
               <h3 className="font-bold text-sm tracking-tight text-white flex items-center gap-1.5">
-                <span>{activeChat?.sellerName ? activeChat.sellerName : companyName}</span>
+                <span>{activeChat?.sellerName ? activeChat.sellerName : effectiveCompanyName}</span>
                 {activeChat?.sellerName && (
                   <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
                     <ShieldCheck className="w-3 h-3 text-emerald-300" />
@@ -1080,35 +1135,21 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
                   <span>Voz: {activeChat?.chosenVoice || activeChat?.locutor || chosenVoice}</span>
                 </span>
               )}
-              <span className="text-[10px] bg-slate-800 text-slate-200 border border-slate-700 font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wider">
-                ID: {chatId.replace('chat_', '').slice(0, 5)}
-              </span>
             </div>
             
             {/* Status Queue details */}
             <div className="text-xs text-indigo-100 flex items-center gap-1.5 mt-0.5">
-              <span className="relative flex h-2 w-2">
+              <span className="relative flex h-2 w-2 shrink-0">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
               </span>
-              <span>
+              <span className="truncate">
                 {activeChat?.status === ChatStatus.NEW && 'Aguardando atendente iniciar...'}
                 {activeChat?.status === ChatStatus.ACTIVE && `Você está conversando com ${activeChat.sellerName}`}
                 {activeChat?.status === ChatStatus.CLOSED && 'Chamado Concluído / Encerrado'}
               </span>
             </div>
           </div>
-        </div>
-
-        <div>
-          <button
-            onClick={clearChatSession}
-            title="Encerrar e abrir outro chamado"
-            className="text-xs bg-black/25 hover:bg-black/40 px-3 py-1.5 rounded-xl text-white font-semibold flex items-center gap-1.5 transition-colors border border-white/15 cursor-pointer shadow-sm"
-          >
-            <XCircle className="w-3.5 h-3.5 text-rose-300" />
-            <span className="hidden sm:inline">Novo Chamado</span>
-          </button>
         </div>
       </div>
 

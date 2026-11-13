@@ -1181,7 +1181,7 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
           </div>
 
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="text-indigo-400 font-extrabold text-[10px] tracking-wider uppercase bg-indigo-950/50 border border-indigo-800/10 px-2.5 py-0.5 rounded-full inline-block">
                 VENDEDOR ONLINE
               </span>
@@ -1194,7 +1194,18 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
               </button>
             </div>
             <h2 className="text-xl font-bold tracking-tight text-white mt-0.5">{sellerUser.name}</h2>
-            <p className="text-xs text-slate-400">{currentName} • Foto de perfil visível no chat dos clientes</p>
+            <div className="flex items-center gap-2 mt-1 flex-wrap">
+              {currentLogo ? (
+                <img
+                  src={currentLogo}
+                  referrerPolicy="no-referrer"
+                  alt={currentName}
+                  className="w-5 h-5 rounded-md object-cover border border-white/20 shrink-0"
+                />
+              ) : null}
+              <p className="text-xs font-semibold text-slate-200">{currentName}</p>
+              <span className="text-xs text-slate-500 hidden sm:inline">• Foto de perfil visível no chat dos clientes</span>
+            </div>
           </div>
         </div>
 
