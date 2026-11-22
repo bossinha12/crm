@@ -1,4 +1,8 @@
 import { Company } from '../types';
+import { executeTursoDirect } from './tursoClient';
+import { deleteTursoMediaByUrls, resolveMediaUrl } from './mediaStorage';
+
+export { executeTursoDirect };
 
 export interface StudioDeliveryRecord {
   id: string;
@@ -20,50 +24,6 @@ export interface StudioDeliveryRecord {
   unlockedBy?: string;
   notes?: string;
   createdAt?: string;
-}
-
-const TURSO_PIPELINE_URL = 'https://bossa-bossa.aws-sa-east-1.turso.io/v2/pipeline';
-const TURSO_AUTH_TOKEN = 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3OTQ0MjI4ODUsImlkIjoiMDFhMWM2NTMtMTcwMS03ODE4LTg3MTMtYmU2ZjQzODdjMzY0Iiwia2lkIjoiUnpjamJ1bmkxQnZ6SGstZGs0aURzRG9yMm1FeXdLbUkydVBpZF8xQUJ0YyIsInJpZCI6IjQ1ZWQzODljLWMxZjMtNDM2My1hZWFiLTA2YzVlMmIzY2NhYyJ9.92VoxZjBJEzg5Y3yU8pWVF3_eM6i3uRfp7S1T2Zw-Blt_2K1tiCiOVxy03nV54gPn4gRtjMbVl4USFlSXyLyAw';
-
-// Execução direta e resiliente no banco Turso via REST Pipeline (Funciona no Vercel, Netlify e Localhost)
-export async function executeTursoDirect(sql: string, args: any[] = []): Promise<any> {
-  const formattedArgs = args.map(arg => {
-    if (arg === null || arg === undefined) return { type: 'null' };
-    if (typeof arg === 'number') return { type: Number.isInteger(arg) ? 'integer' : 'float', value: String(arg) };
-    if (typeof arg === 'boolean') return { type: 'integer', value: arg ? '1' : '0' };
-    return { type: 'text', value: String(arg) };
-  });
-
-  const res = await fetch(TURSO_PIPELINE_URL, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${TURSO_AUTH_TOKEN}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      requests: [
-        {
-          type: 'execute',
-          stmt: {
-            sql,
-            args: formattedArgs
-          }
-        }
-      ]
-    })
-  });
-
-  if (!res.ok) {
-    const txt = await res.text().catch(() => '');
-    throw new Error(`Falha no banco Turso (${res.status}): ${txt}`);
-  }
-
-  const data = await res.json();
-  const firstResult = data?.results?.[0];
-  if (firstResult?.type === 'error') {
-    throw new Error(firstResult.error?.message || 'Erro ao consultar banco Turso');
-  }
-  return firstResult?.response?.result;
 }
 
 // Checks if a company is the Bossa Studio (or has isStudioMode enabled)
@@ -226,17 +186,45 @@ export async function getStudioDelivery(deliveryId: string): Promise<StudioDeliv
   }
 }
 
-// Excluir entrega específica do banco Turso bossa
-export async function deleteStudioDelivery(deliveryId: string): Promise<boolean> {
-  try {
-    const res = await fetch(`/api/studio/deliveries/${deliveryId}`, {
-      method: 'DELETE'
-    });
-    if (res.ok) return true;
-  } catch (e) {}
+// Excluir entrega específica do banco Turso bossa (inclui limpeza de chunks de mídia)
+export async function deleteStudioDelivery(
+  deliveryId?: string | null,
+  extraMediaUrls: Array<string | null | undefined> = []
+): Promise<boolean> {
+  if (deliveryId) {
+    try {
+      const res = await fetch(`/api/studio/deliveries/${deliveryId}`, {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        if (extraMediaUrls.length > 0) {
+          await deleteTursoMediaByUrls(extraMediaUrls);
+        }
+        return true;
+      }
+    } catch (e) {}
+  }
 
   try {
-    await executeTursoDirect('DELETE FROM studio_deliveries WHERE id = ? OR order_id = ?', [deliveryId, deliveryId]);
+    const urlsToClean: Array<string | null | undefined> = [...extraMediaUrls];
+    if (deliveryId) {
+      try {
+        const lookup = await executeTursoDirect(
+          'SELECT preview_url, final_download_url FROM studio_deliveries WHERE id = ? OR order_id = ?',
+          [deliveryId, deliveryId]
+        );
+        for (const row of lookup?.rows || []) {
+          urlsToClean.push(row?.[0]?.value, row?.[1]?.value);
+        }
+      } catch (e) {}
+
+      await executeTursoDirect('DELETE FROM studio_deliveries WHERE id = ? OR order_id = ?', [
+        deliveryId,
+        deliveryId
+      ]);
+    }
+
+    await deleteTursoMediaByUrls(urlsToClean);
     return true;
   } catch (e) {
     console.error('Erro ao deletar projeto diretamente no Turso:', e);
@@ -260,12 +248,30 @@ export async function cleanupStudioDeliveries(mode: 'completed' | 'all' = 'compl
   } catch (e) {}
 
   // 2. Fallback direto ao Turso HTTP (Garante funcionamento 100% no Vercel!)
-  const sql = mode === 'all' 
-    ? 'DELETE FROM studio_deliveries' 
+  const urlsToClean: Array<string | null | undefined> = [];
+  if (mode !== 'all') {
+    try {
+      const lookup = await executeTursoDirect(
+        'SELECT preview_url, final_download_url FROM studio_deliveries WHERE download_unlocked = 1'
+      );
+      for (const row of lookup?.rows || []) {
+        urlsToClean.push(row?.[0]?.value, row?.[1]?.value);
+      }
+    } catch (e) {}
+  }
+
+  const sql = mode === 'all'
+    ? 'DELETE FROM studio_deliveries'
     : 'DELETE FROM studio_deliveries WHERE download_unlocked = 1';
-  
+
   const result = await executeTursoDirect(sql);
   const rowsAffected = Number(result?.affected_row_count || 0);
+
+  if (mode === 'all') {
+    executeTursoDirect('DELETE FROM studio_media_chunks').catch(() => {});
+  } else if (urlsToClean.length > 0) {
+    await deleteTursoMediaByUrls(urlsToClean);
+  }
 
   return {
     ok: true,
@@ -278,7 +284,18 @@ export async function cleanupStudioDeliveries(mode: 'completed' | 'all' = 'compl
 // Disparo de Download direto do arquivo de áudio ou vídeo no PC do cliente/produtor
 export async function downloadMediaFile(url: string, filename: string): Promise<void> {
   try {
-    const res = await fetch(url);
+    const resolvedUrl = await resolveMediaUrl(url);
+    if (resolvedUrl.startsWith('blob:') || resolvedUrl.startsWith('data:')) {
+      const link = document.createElement('a');
+      link.href = resolvedUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      return;
+    }
+
+    const res = await fetch(resolvedUrl);
     if (!res.ok) throw new Error('Falha ao obter arquivo');
     const blob = await res.blob();
     const blobUrl = URL.createObjectURL(blob);
@@ -291,8 +308,9 @@ export async function downloadMediaFile(url: string, filename: string): Promise<
     setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
   } catch (err) {
     // Fallback padrão se CORS bloquear fetch
+    const fallbackUrl = await resolveMediaUrl(url).catch(() => url);
     const link = document.createElement('a');
-    link.href = url;
+    link.href = fallbackUrl;
     link.download = filename;
     link.target = '_blank';
     link.rel = 'noopener noreferrer';

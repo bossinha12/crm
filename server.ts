@@ -55,7 +55,19 @@ async function initBossaDatabase() {
         updated_at TEXT NOT NULL
       );
     `);
-    console.log('✅ [Turso bossa] Tabela studio_deliveries verificada/criada com sucesso no Turso!');
+    await client.execute(`
+      CREATE TABLE IF NOT EXISTS studio_media_chunks (
+        media_id TEXT NOT NULL,
+        chunk_index INTEGER NOT NULL,
+        total_chunks INTEGER NOT NULL,
+        mime_type TEXT NOT NULL,
+        file_name TEXT,
+        data TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (media_id, chunk_index)
+      );
+    `);
+    console.log('✅ [Turso bossa] Tabelas studio_deliveries e studio_media_chunks verificadas/criadas com sucesso no Turso!');
   } catch (err) {
     console.error('⚠️ [Turso bossa] Erro ao inicializar tabela:', err);
   }
@@ -281,15 +293,40 @@ app.get('/api/studio/chats/:chatId/deliveries', async (req, res) => {
   }
 });
 
-// 6. EXCLUIR PROJETO DO BANCO TURSO (BOSSA) - Deletar um projeto específico
+// 6. EXCLUIR PROJETO DO BANCO TURSO (BOSSA) - Deletar um projeto específico e seus chunks de mídia
 app.delete('/api/studio/deliveries/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const client = getTursoClient();
+
+    const mediaIds = new Set<string>();
+    try {
+      const existing = await client.execute({
+        sql: 'SELECT preview_url, final_download_url FROM studio_deliveries WHERE id = ? OR order_id = ?',
+        args: [id, id]
+      });
+      for (const row of existing.rows) {
+        for (const val of [row.preview_url, row.final_download_url]) {
+          if (typeof val === 'string' && val.startsWith('turso://')) {
+            const mediaId = val.slice('turso://'.length).trim();
+            if (mediaId) mediaIds.add(mediaId);
+          }
+        }
+      }
+    } catch (e) {}
+
     await client.execute({
       sql: 'DELETE FROM studio_deliveries WHERE id = ? OR order_id = ?',
       args: [id, id]
     });
+
+    for (const mediaId of mediaIds) {
+      await client.execute({
+        sql: 'DELETE FROM studio_media_chunks WHERE media_id = ?',
+        args: [mediaId]
+      }).catch(() => {});
+    }
+
     return res.json({ ok: true, message: 'Projeto de áudio/vídeo excluído do banco Turso com sucesso!' });
   } catch (err: any) {
     console.error('Erro ao excluir entrega do Turso:', err);
@@ -303,12 +340,41 @@ app.post('/api/studio/cleanup', async (req, res) => {
     const { mode } = req.body; // 'completed' | 'all'
     const client = getTursoClient();
 
+    const mediaIds = new Set<string>();
+    if (mode !== 'all') {
+      try {
+        const existing = await client.execute(
+          'SELECT preview_url, final_download_url FROM studio_deliveries WHERE download_unlocked = 1'
+        );
+        for (const row of existing.rows) {
+          for (const val of [row.preview_url, row.final_download_url]) {
+            if (typeof val === 'string' && val.startsWith('turso://')) {
+              const mediaId = val.slice('turso://'.length).trim();
+              if (mediaId) mediaIds.add(mediaId);
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
     let sql = 'DELETE FROM studio_deliveries WHERE download_unlocked = 1';
     if (mode === 'all') {
       sql = 'DELETE FROM studio_deliveries';
     }
 
     const result = await client.execute(sql);
+
+    if (mode === 'all') {
+      await client.execute('DELETE FROM studio_media_chunks').catch(() => {});
+    } else {
+      for (const mediaId of mediaIds) {
+        await client.execute({
+          sql: 'DELETE FROM studio_media_chunks WHERE media_id = ?',
+          args: [mediaId]
+        }).catch(() => {});
+      }
+    }
+
     return res.json({
       ok: true,
       affectedRows: result.rowsAffected,

@@ -5,6 +5,7 @@ import { uploadToImgBB } from '../lib/imgbb';
 import { uploadAudio } from '../lib/audioUpload';
 import { useAudioRecorder } from '../lib/useAudioRecorder';
 import AudioMessagePlayer from './AudioMessagePlayer';
+import ResolvedVideoPlayer from './ResolvedVideoPlayer';
 import { Chat, User, Message, ChatStatus, Company, InternalMessage } from '../types';
 import { crmAlarm } from '../lib/audio';
 import { 
@@ -839,7 +840,7 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
     const isStudio = isBossaStudioCompany(company, companyId);
 
     try {
-      // 1. Upload to temporary 72h host (0 heavy storage in Firestore!)
+      // 1. Upload para o banco Turso em chunks (0 bytes pesados no Firestore!)
       const { audioUrl } = await uploadAudio(fileOrBlob);
 
       let deliveryId: string | undefined = undefined;
@@ -864,7 +865,7 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
         }
       }
 
-      // Save message in Firestore with audio URL only
+      // Save message in Firestore with short reference only
       const messagesRef = collection(db, 'companies', companyId, 'chats', selectedChatId, 'messages');
       await addDoc(messagesRef, sanitizeFirestoreData({
         chatId: selectedChatId,
@@ -895,7 +896,7 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
     } catch (err) {
       console.error("Erro ao enviar áudio pelo vendedor:", err);
       setUploadError(err instanceof Error ? err.message : 'Erro ao processar áudio.');
-      setTimeout(() => setUploadError(null), 4000);
+      setTimeout(() => setUploadError(null), 6000);
     } finally {
       setIsUploadingAudio(false);
     }
@@ -926,7 +927,7 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
     const videoLabel = `🎬 ${file.name || 'Vídeo / Produção Audiovisual'}`;
 
     try {
-      // Upload via temporary stream host
+      // Upload para o banco Turso em chunks (0 bytes pesados no Firestore!)
       const { audioUrl: videoUrl } = await uploadAudio(file);
 
       let deliveryId: string | undefined = undefined;
@@ -980,7 +981,7 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
     } catch (err) {
       console.error('Erro ao enviar vídeo:', err);
       setUploadError(err instanceof Error ? err.message : 'Erro ao processar vídeo.');
-      setTimeout(() => setUploadError(null), 4000);
+      setTimeout(() => setUploadError(null), 6000);
     } finally {
       setIsUploadingVideo(false);
       if (videoFileInputRef.current) videoFileInputRef.current.value = '';
@@ -988,14 +989,14 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
   };
 
   // EXCLUIR PROJETO DO BANCO TURSO & FIRESTORE (Evitar lixo / serviços antigos)
-  const handleDeleteProjectFromDatabase = async (messageId: string, deliveryId?: string) => {
+  const handleDeleteProjectFromDatabase = async (messageId: string, deliveryId?: string, mediaUrl?: string) => {
     if (!selectedChatId) return;
     if (!confirm('Deseja EXCLUIR este projeto definitivamente do banco de dados Turso e do chat para não acumular lixo/espaço?')) return;
 
     try {
-      // 1. Deletar do banco Turso bossa
-      if (deliveryId) {
-        await deleteStudioDelivery(deliveryId);
+      // 1. Deletar do banco Turso bossa (entrega + chunks de mídia)
+      if (deliveryId || mediaUrl) {
+        await deleteStudioDelivery(deliveryId, [mediaUrl]);
       }
 
       // 2. Deletar a mensagem do Firestore
@@ -1674,7 +1675,7 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
                               duration={m.audioDuration}
                               isMe={isSeller}
                               canDelete={true}
-                              onDelete={() => handleDeleteProjectFromDatabase(m.id, m.deliveryId)}
+                              onDelete={() => handleDeleteProjectFromDatabase(m.id, m.deliveryId, m.audioUrl)}
                               isStudioDelivery={Boolean(m.isStudioDelivery || isBossaStudioCompany(company, companyId))}
                               downloadUnlocked={Boolean(m.downloadUnlocked)}
                               title={m.text !== '🎤 Mensagem de Voz' ? m.text : undefined}
@@ -1699,7 +1700,7 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
                                 )}
                                 <button
                                   type="button"
-                                  onClick={() => handleDeleteProjectFromDatabase(m.id, m.deliveryId)}
+                                  onClick={() => handleDeleteProjectFromDatabase(m.id, m.deliveryId, m.audioUrl)}
                                   className="text-[10px] text-slate-300 hover:text-rose-400 bg-slate-900/60 hover:bg-rose-950/60 border border-slate-700 hover:border-rose-800/80 px-2 py-0.5 rounded-md flex items-center gap-1 transition-colors cursor-pointer"
                                   title="Excluir este projeto do banco de dados Turso para não acumular lixo"
                                 >
@@ -1714,10 +1715,8 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
                         {hasVideo && (
                           <div className="space-y-2 min-w-[260px] max-w-sm">
                             <div className="rounded-xl overflow-hidden bg-black/60 relative border border-slate-700">
-                              <video
-                                src={m.videoUrl}
-                                controls
-                                preload="metadata"
+                              <ResolvedVideoPlayer
+                                src={m.videoUrl!}
                                 className="w-full max-h-64 object-contain rounded-xl"
                               />
                             </div>
@@ -1750,7 +1749,7 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
                                       <div className="flex justify-end pt-1 border-t border-emerald-800/40">
                                         <button
                                           type="button"
-                                          onClick={() => handleDeleteProjectFromDatabase(m.id, m.deliveryId)}
+                                          onClick={() => handleDeleteProjectFromDatabase(m.id, m.deliveryId, m.videoUrl)}
                                           className="text-[10px] text-slate-300 hover:text-rose-400 bg-slate-900/60 hover:bg-rose-950/60 border border-slate-700 hover:border-rose-800/80 px-2 py-0.5 rounded-md flex items-center gap-1 transition-colors cursor-pointer"
                                           title="Excluir este vídeo do banco de dados Turso para não acumular lixo"
                                         >
@@ -1779,7 +1778,7 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
                                       </button>
                                       <button
                                         type="button"
-                                        onClick={() => handleDeleteProjectFromDatabase(m.id, m.deliveryId)}
+                                        onClick={() => handleDeleteProjectFromDatabase(m.id, m.deliveryId, m.videoUrl)}
                                         className="text-[10px] text-slate-400 hover:text-rose-400 flex items-center gap-1 transition-colors cursor-pointer"
                                         title="Excluir do Turso para não acumular lixo"
                                       >

@@ -3,6 +3,7 @@ import { collection, onSnapshot, query, orderBy, doc, setDoc, deleteDoc, getDocs
 import { db, handleFirestoreError, OperationType, sanitizeFirestoreData } from '../lib/firebase';
 import { User, Chat, Message, ChatStatus, Company, Lead, OperatingHours } from '../types';
 import AudioMessagePlayer from './AudioMessagePlayer';
+import { deleteTursoMediaByUrls } from '../lib/mediaStorage';
 import { 
   BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer 
 } from 'recharts';
@@ -142,11 +143,13 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
   const handleDeleteSingleMessageMedia = async (chatId: string, messageId: string) => {
     if (!confirm('Deseja remover este áudio desta conversa para liberar espaço no banco de dados?')) return;
     try {
+      const targetMsg = mirroredMessages.find(m => m.id === messageId);
       const msgRef = doc(db, 'companies', companyId, 'chats', chatId, 'messages', messageId);
       await updateDoc(msgRef, {
         audioUrl: null,
         text: '🗑️ [Áudio removido pelo Administrador]'
       });
+      await deleteTursoMediaByUrls([targetMsg?.audioUrl, targetMsg?.videoUrl]);
       setMirroredMessages(prev => prev.map(m => m.id === messageId ? { ...m, audioUrl: undefined, text: '🗑️ [Áudio removido pelo Administrador]' } : m));
     } catch (err) {
       console.error('Erro ao deletar áudio da mensagem:', err);
@@ -170,6 +173,7 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
     try {
       let cleanedAudiosCount = 0;
       let cleanedImagesCount = 0;
+      const tursoUrlsToDelete: Array<string | undefined | null> = [];
 
       for (const c of chats) {
         const msgsRef = collection(db, 'companies', companyId, 'chats', c.id, 'messages');
@@ -180,6 +184,7 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
           const updates: any = {};
           
           if ((cleanMode === 'audio_only' || cleanMode === 'all') && data.audioUrl) {
+            tursoUrlsToDelete.push(data.audioUrl);
             updates.audioUrl = null;
             if (!data.text || data.text === '🎤 Mensagem de Voz') {
               updates.text = '🗑️ [Áudio removido pelo Administrador]';
@@ -199,6 +204,10 @@ export default function MasterDashboard({ companyId, company, adminUser, onLogou
             await updateDoc(doc(db, 'companies', companyId, 'chats', c.id, 'messages', msgDoc.id), updates);
           }
         }
+      }
+
+      if (tursoUrlsToDelete.length > 0) {
+        await deleteTursoMediaByUrls(tursoUrlsToDelete);
       }
 
       setCleanMediaResult(

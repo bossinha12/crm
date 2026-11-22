@@ -1,58 +1,44 @@
-/**
- * Audio Upload and Storage Service
- * 
- * Uploads audio to a temporary free external host (Litterbox, expires in 72h)
- * ensuring 0 heavy audio binaries are permanently stored in Firestore,
- * with reliable fallback to compressed data URL if network is offline.
- */
+import { uploadMediaToTurso } from './mediaStorage';
 
+/**
+ * Audio & Video Upload Service
+ *
+ * Salva mídias diretamente no banco Turso (`bossa` -> `studio_media_chunks`) em chunks
+ * e retorna uma referência curta `turso://med_...` garantindo que nenhum documento do Firestore
+ * ultrapasse o limite de 1 MB (1.048.576 bytes).
+ */
 export async function uploadAudio(
   fileOrBlob: Blob | File,
   customName?: string
 ): Promise<{ audioUrl: string }> {
-  const extension = fileOrBlob.type.includes('mp4') 
-    ? 'm4a' 
-    : fileOrBlob.type.includes('ogg') 
-    ? 'ogg' 
-    : fileOrBlob.type.includes('mp3') 
-    ? 'mp3' 
+  const extension = fileOrBlob.type.includes('mp4')
+    ? 'm4a'
+    : fileOrBlob.type.includes('ogg')
+    ? 'ogg'
+    : fileOrBlob.type.includes('mp3') || fileOrBlob.type.includes('mpeg')
+    ? 'mp3'
+    : fileOrBlob.type.includes('wav')
+    ? 'wav'
     : 'webm';
 
-  const fileName = customName || `audio_${Date.now()}.${extension}`;
-  const file = fileOrBlob instanceof File 
-    ? fileOrBlob 
-    : new File([fileOrBlob], fileName, { type: fileOrBlob.type || 'audio/webm' });
+  const fileName =
+    customName ||
+    (fileOrBlob instanceof File && fileOrBlob.name ? fileOrBlob.name : `audio_${Date.now()}.${extension}`);
 
   try {
-    const formData = new FormData();
-    formData.append('reqtype', 'fileupload');
-    formData.append('time', '72h'); // 72 hours temporary auto-expire
-    formData.append('fileToUpload', file);
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 12000); // 12s timeout
-
-    const response = await fetch('https://litterbox.catbox.moe/resources/internals/api.php', {
-      method: 'POST',
-      body: formData,
-      signal: controller.signal
-    });
-
-    clearTimeout(timeoutId);
-
-    if (response.ok) {
-      const text = await response.text();
-      const trimmed = text.trim();
-      if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-        return { audioUrl: trimmed };
-      }
-    }
-    throw new Error('Servidor temporário indisponível');
+    const tursoUrl = await uploadMediaToTurso(fileOrBlob, fileName);
+    return { audioUrl: tursoUrl };
   } catch (err) {
-    console.warn('Upload temporário externo falhou ou foi bloqueado, usando data URL compactado:', err);
-    // Reliable fallback: convert to base64 data URL
+    console.warn('Falha ao enviar mídia para Turso:', err);
+    // Fallback seguro APENAS para arquivos bem pequenos (< 700 KB em base64),
+    // garantindo que NUNCA ultrapasse o limite de 1.048.576 bytes do Firestore.
     const base64 = await blobToBase64(fileOrBlob);
-    return { audioUrl: base64 };
+    if (base64.length < 700_000) {
+      return { audioUrl: base64 };
+    }
+    throw new Error(
+      'Não foi possível salvar o arquivo de mídia no servidor Turso. Verifique sua conexão e tente novamente.'
+    );
   }
 }
 

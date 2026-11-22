@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Play, Pause, Volume2, Trash2, Download, AlertCircle, Lock, Unlock, CheckCircle2, Music, Sparkles } from 'lucide-react';
+import { Play, Pause, Volume2, Trash2, Download, AlertCircle, Lock, Unlock, CheckCircle2, Sparkles, Loader2 } from 'lucide-react';
 import { downloadMediaFile } from '../lib/studioService';
+import { isTursoMediaUrl, resolveMediaUrl } from '../lib/mediaStorage';
 
 interface AudioMessagePlayerProps {
   key?: React.Key;
@@ -39,17 +40,63 @@ export default function AudioMessagePlayer({
   const [playbackRate, setPlaybackRate] = useState<number>(1);
   const [isError, setIsError] = useState(false);
   const [isUnlocked, setIsUnlocked] = useState(Boolean(downloadUnlocked));
+  const [resolvedAudioUrl, setResolvedAudioUrl] = useState<string>(isTursoMediaUrl(audioUrl) ? '' : audioUrl);
+  const [isResolving, setIsResolving] = useState<boolean>(isTursoMediaUrl(audioUrl));
 
   useEffect(() => {
     setIsUnlocked(Boolean(downloadUnlocked));
   }, [downloadUnlocked]);
 
+  useEffect(() => {
+    let cancelled = false;
+    setIsError(false);
+    setIsPlaying(false);
+
+    if (!audioUrl) {
+      setResolvedAudioUrl('');
+      setIsResolving(false);
+      return;
+    }
+
+    if (!isTursoMediaUrl(audioUrl)) {
+      setResolvedAudioUrl(audioUrl);
+      setIsResolving(false);
+      return;
+    }
+
+    setIsResolving(true);
+    setResolvedAudioUrl('');
+    resolveMediaUrl(audioUrl)
+      .then((url) => {
+        if (!cancelled) {
+          setResolvedAudioUrl(url);
+          setIsResolving(false);
+        }
+      })
+      .catch((err) => {
+        console.warn('Erro ao carregar áudio do Turso:', err);
+        if (!cancelled) {
+          setIsResolving(false);
+          setIsError(true);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [audioUrl]);
+
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
+    if (!resolvedAudioUrl) {
+      audioRef.current = null;
+      return;
+    }
+
     const audio = new Audio();
     audioRef.current = audio;
-    audio.src = audioUrl;
+    audio.src = resolvedAudioUrl;
     audio.preload = 'metadata';
 
     const handleLoadedMetadata = () => {
@@ -85,10 +132,10 @@ export default function AudioMessagePlayer({
       audio.removeEventListener('error', handleError);
       audio.src = '';
     };
-  }, [audioUrl]);
+  }, [resolvedAudioUrl]);
 
   const togglePlay = () => {
-    if (!audioRef.current || isError) return;
+    if (!audioRef.current || isError || isResolving) return;
 
     if (isPlaying) {
       audioRef.current.pause();
@@ -161,14 +208,17 @@ export default function AudioMessagePlayer({
         <button
           type="button"
           onClick={togglePlay}
-          className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 transition-transform active:scale-95 shadow-sm cursor-pointer ${
+          disabled={isResolving}
+          className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 transition-transform active:scale-95 shadow-sm cursor-pointer disabled:opacity-70 ${
             isMe
               ? 'bg-white text-indigo-700 hover:bg-indigo-50'
               : 'bg-indigo-600 text-white hover:bg-indigo-700'
           }`}
-          title={isPlaying ? 'Pausar áudio' : 'Ouvir áudio'}
+          title={isResolving ? 'Carregando áudio...' : isPlaying ? 'Pausar áudio' : 'Ouvir áudio'}
         >
-          {isPlaying ? (
+          {isResolving ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : isPlaying ? (
             <Pause className="w-4 h-4 fill-current" />
           ) : (
             <Play className="w-4 h-4 fill-current translate-x-0.5" />

@@ -5,6 +5,7 @@ import { uploadToImgBB } from '../lib/imgbb';
 import { uploadAudio } from '../lib/audioUpload';
 import { useAudioRecorder } from '../lib/useAudioRecorder';
 import AudioMessagePlayer from './AudioMessagePlayer';
+import ResolvedVideoPlayer from './ResolvedVideoPlayer';
 import { Chat, Message, ChatStatus, Lead, Company } from '../types';
 import { 
   Send, MessageSquare, Phone, User, CheckCheck, Landmark, RefreshCw, 
@@ -719,10 +720,11 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
     const messageText = customLabel || '🎤 Mensagem de Voz';
 
     try {
-      // 1. Upload to temporary 72h host (0 heavy storage in Firestore!)
+      // 1. Upload para o banco Turso em chunks (0 bytes pesados no Firestore)
       const { audioUrl } = await uploadAudio(fileOrBlob);
 
       const newMsgId = 'msg_' + Math.random().toString(36).substring(2, 11) + '_' + Date.now().toString().slice(-4);
+      const nowIso = new Date().toISOString();
       const newMsg: Message = {
         id: newMsgId,
         chatId,
@@ -732,10 +734,22 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
         text: messageText,
         audioUrl,
         audioDuration: duration,
-        createdAt: new Date().toISOString()
+        createdAt: nowIso
       };
 
-      // Optimistic update
+      // Save message to Firestore with short audio reference (turso://...)
+      const messagesRef = collection(db, 'companies', companyId, 'chats', chatId, 'messages');
+      await addDoc(messagesRef, sanitizeFirestoreData({
+        chatId,
+        companyId,
+        senderType: 'client',
+        senderName: activeChat?.clientName || clientName || 'Cliente',
+        text: messageText,
+        audioUrl,
+        audioDuration: duration || null,
+        createdAt: nowIso
+      }));
+
       const updatedMessages = [...messages, newMsg];
       setMessages(updatedMessages);
       localStorage.setItem(`atendepro_backup_msgs_${chatId}`, JSON.stringify(updatedMessages));
@@ -744,36 +758,23 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
         const updatedChat = {
           ...activeChat,
           lastMessage: messageText,
-          lastMessageAt: new Date().toISOString(),
+          lastMessageAt: nowIso,
           lastMessageSender: 'client' as const,
           unreadBySeller: true,
-          updatedAt: new Date().toISOString()
+          updatedAt: nowIso
         };
         setActiveChat(updatedChat);
         localStorage.setItem(`atendepro_backup_chat_${chatId}`, JSON.stringify(updatedChat));
       }
 
-      // Save message to Firestore with audio URL only
-      const messagesRef = collection(db, 'companies', companyId, 'chats', chatId, 'messages');
-      await addDoc(messagesRef, sanitizeFirestoreData({
-        chatId,
-        companyId,
-        senderType: 'client',
-        senderName: activeChat?.clientName || clientName || 'Cliente',
-        text: '🎤 Mensagem de Voz',
-        audioUrl,
-        audioDuration: duration || null,
-        createdAt: new Date().toISOString()
-      }));
-
       const chatDocRef = doc(db, 'companies', companyId, 'chats', chatId);
       const chatPayload = activeChat ? {
         ...activeChat,
-        lastMessage: '🎤 Mensagem de Voz',
-        lastMessageAt: new Date().toISOString(),
+        lastMessage: messageText,
+        lastMessageAt: nowIso,
         lastMessageSender: 'client' as const,
         unreadBySeller: true,
-        updatedAt: new Date().toISOString()
+        updatedAt: nowIso
       } : {
         id: chatId,
         companyId,
@@ -782,18 +783,18 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
         status: ChatStatus.NEW,
         unreadBySeller: true,
         unreadByClient: false,
-        lastMessage: '🎤 Mensagem de Voz',
-        lastMessageAt: new Date().toISOString(),
+        lastMessage: messageText,
+        lastMessageAt: nowIso,
         lastMessageSender: 'client' as const,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+        createdAt: nowIso,
+        updatedAt: nowIso
       };
       await setDoc(chatDocRef, sanitizeFirestoreData(chatPayload), { merge: true });
 
     } catch (err) {
       console.error('Erro ao enviar áudio do cliente:', err);
       setUploadError(err instanceof Error ? err.message : 'Erro ao processar envio de áudio.');
-      setTimeout(() => setUploadError(null), 4000);
+      setTimeout(() => setUploadError(null), 6000);
     } finally {
       setIsUploadingAudio(false);
     }
@@ -1337,10 +1338,8 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
                   {hasVideo && (
                     <div key={`video-${m.id}-${m.downloadUnlocked ? 'unlocked' : 'locked'}`} className="space-y-2 min-w-[240px] max-w-sm">
                       <div className="rounded-xl overflow-hidden bg-black/60 relative border border-slate-200">
-                        <video
-                          src={m.videoUrl}
-                          controls
-                          preload="metadata"
+                        <ResolvedVideoPlayer
+                          src={m.videoUrl!}
                           className="w-full max-h-60 object-contain rounded-xl"
                         />
                       </div>

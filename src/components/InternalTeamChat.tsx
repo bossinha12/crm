@@ -486,14 +486,6 @@ export default function InternalTeamChat({
         createdAt: new Date().toISOString()
       };
 
-      setMessages(prev => {
-        const updated = [...prev, newMsg];
-        try {
-          localStorage.setItem(`atendepro_internal_msgs_${activeCompanyId}`, JSON.stringify(updated));
-        } catch (e) {}
-        return updated;
-      });
-
       const audioDataToSave = sanitizeFirestoreData({
         companyId: newMsg.companyId,
         senderId: newMsg.senderId,
@@ -514,10 +506,18 @@ export default function InternalTeamChat({
       if (altCompanyId && altCompanyId !== activeCompanyId) {
         addDoc(collection(db, 'companies', altCompanyId, 'internal_messages'), audioDataToSave).catch(() => {});
       }
+
+      setMessages(prev => {
+        const updated = [...prev, newMsg];
+        try {
+          localStorage.setItem(`atendepro_internal_msgs_${activeCompanyId}`, JSON.stringify(updated));
+        } catch (e) {}
+        return updated;
+      });
     } catch (err) {
       console.error("Erro no envio de áudio no chat interno:", err);
       setUploadError(err instanceof Error ? err.message : 'Erro ao processar áudio.');
-      setTimeout(() => setUploadError(null), 4000);
+      setTimeout(() => setUploadError(null), 6000);
     } finally {
       setIsUploadingAudio(false);
     }
