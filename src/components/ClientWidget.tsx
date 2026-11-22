@@ -11,10 +11,11 @@ import {
   Send, MessageSquare, Phone, User, CheckCheck, Landmark, RefreshCw, 
   XCircle, Image as ImageIcon, Camera, Loader2, ExternalLink, X, ShieldCheck,
   Clock, Bell, BellRing, BellOff, Calendar, CheckCircle2, Sparkles, AlertCircle,
-  Mic, Trash2, Music, Lock, Download, Video
+  Mic, Trash2, Music, Lock, Unlock, Download, Video
 } from 'lucide-react';
 import { formatMessageDateTime } from '../lib/formatters';
 import { crmAlarm } from '../lib/audio';
+import { sendPwaPushNotification } from '../lib/notifications';
 import { checkOperatingHours, OperatingHoursStatus } from '../lib/operatingHours';
 import { isBossaStudioCompany, downloadMediaFile } from '../lib/studioService';
 
@@ -35,7 +36,18 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
     setLogoFailed(false);
   }, [effectiveCompanyLogo]);
 
-  const [chatId, setChatId] = useState<string | null>(localStorage.getItem(`atendepro_client_chat_id`));
+  const [chatId, setChatId] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const urlChatId = params.get('chat') || params.get('chatId');
+      if (urlChatId && urlChatId.trim()) {
+        const cleanId = urlChatId.trim();
+        localStorage.setItem('atendepro_client_chat_id', cleanId);
+        return cleanId;
+      }
+    }
+    return localStorage.getItem('atendepro_client_chat_id');
+  });
   const [activeChat, setActiveChat] = useState<Chat | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
@@ -52,14 +64,48 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
     return localStorage.getItem('atendepro_notif_prompt_dismissed') !== 'true';
   });
   const [testNotifSent, setTestNotifSent] = useState(false);
+  const [incomingAlert, setIncomingAlert] = useState<{
+    id: string;
+    type: 'audio' | 'video' | 'unlock' | 'message';
+    title: string;
+    subtitle: string;
+    senderName: string;
+  } | null>(null);
 
   // Live Operating Hours calculation
   const operatingStatus = useMemo(() => {
     return checkOperatingHours(company?.operatingHours);
   }, [company?.operatingHours]);
 
-  const prevMessagesLengthRef = useRef(0);
+  const seenMessageIdsRef = useRef<Set<string> | null>(null);
+  const prevUnlockedIdsRef = useRef<Set<string>>(new Set());
+  const alertTimeoutRef = useRef<number | null>(null);
   const originalTitleRef = useRef(typeof document !== 'undefined' ? document.title : '');
+
+  const scrollToLatestMessage = () => {
+    if (clientMessagesContainerRef.current) {
+      clientMessagesContainerRef.current.scrollTo({
+        top: clientMessagesContainerRef.current.scrollHeight,
+        behavior: 'smooth',
+      });
+    }
+  };
+
+  const triggerIncomingAlert = (alertData: {
+    id: string;
+    type: 'audio' | 'video' | 'unlock' | 'message';
+    title: string;
+    subtitle: string;
+    senderName: string;
+  }) => {
+    setIncomingAlert(alertData);
+    if (alertTimeoutRef.current) {
+      window.clearTimeout(alertTimeoutRef.current);
+    }
+    alertTimeoutRef.current = window.setTimeout(() => {
+      setIncomingAlert(null);
+    }, 12000);
+  };
 
   // Reset tab title upon user focus
   useEffect(() => {
@@ -69,13 +115,18 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
       }
     };
     window.addEventListener('focus', handleFocus);
-    return () => window.removeEventListener('focus', handleFocus);
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      if (alertTimeoutRef.current) {
+        window.clearTimeout(alertTimeoutRef.current);
+      }
+    };
   }, []);
 
-  // Request browser notification permission
+  // Request browser/PWA notification permission
   const handleRequestNotificationPermission = async () => {
     if (typeof window === 'undefined' || !('Notification' in window)) {
-      alert('Seu navegador não oferece suporte a notificações na tela.');
+      alert('Seu navegador não oferece suporte a notificações na barra do sistema. Mantenha esta aba aberta para receber alertas sonoros na tela.');
       return;
     }
 
@@ -85,12 +136,12 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
       if (perm === 'granted') {
         setTestNotifSent(true);
         crmAlarm.playMessageNotification();
-        try {
-          new Notification(`${companyName} • Notificações Ativadas!`, {
-            body: 'Tudo pronto! Você receberá avisos sonoros e na tela do seu celular assim que nosso vendedor responder.',
-            icon: companyLogo || '/vite.svg'
-          });
-        } catch (e) {}
+        await sendPwaPushNotification(`${effectiveCompanyName} • Notificações Ativadas!`, {
+          body: 'Tudo pronto! Você receberá avisos sonoros e na tela do seu celular assim que enviarmos seu áudio ou resposta.',
+          companyLogo: effectiveCompanyLogo || undefined,
+          url: window.location.href,
+          tag: 'atendepro-client-notif-test'
+        });
         setTimeout(() => setTestNotifSent(false), 5000);
       }
     } catch (e) {
@@ -242,6 +293,10 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
       }
     });
 
+    // Reset message tracking refs for this chat session
+    seenMessageIdsRef.current = null;
+    prevUnlockedIdsRef.current = new Set();
+
     // Messages array list listener (Index-free query with robust in-memory sorting)
     const messagesCollectionRef = collection(db, 'companies', companyId, 'chats', chatId, 'messages');
     
@@ -258,36 +313,99 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
         return timeA - timeB;
       });
 
-      // Trigger audio & push notification when new message arrives from seller
-      if (prevMessagesLengthRef.current > 0 && msgs.length > prevMessagesLengthRef.current) {
-        const latestMsg = msgs[msgs.length - 1];
-        if (latestMsg && latestMsg.senderType === 'seller') {
-          // 1. Play pleasant audio chime
+      // Initialize seen refs on first load of this chat without triggering stale alerts
+      if (seenMessageIdsRef.current === null) {
+        seenMessageIdsRef.current = new Set(msgs.map((m) => m.id));
+        prevUnlockedIdsRef.current = new Set(msgs.filter((m) => m.downloadUnlocked).map((m) => m.id));
+      } else {
+        const newSellerMsgs = msgs.filter(
+          (m) => !seenMessageIdsRef.current!.has(m.id) && m.senderType === 'seller'
+        );
+        const newlyUnlockedMsgs = msgs.filter(
+          (m) => m.downloadUnlocked && !prevUnlockedIdsRef.current.has(m.id)
+        );
+
+        msgs.forEach((m) => {
+          seenMessageIdsRef.current!.add(m.id);
+          if (m.downloadUnlocked) {
+            prevUnlockedIdsRef.current.add(m.id);
+          }
+        });
+
+        const targetMediaMsg =
+          newSellerMsgs.find((m) => m.audioUrl || m.videoUrl) ||
+          newSellerMsgs[newSellerMsgs.length - 1] ||
+          newlyUnlockedMsgs[newlyUnlockedMsgs.length - 1];
+
+        if (targetMediaMsg) {
+          const isUnlockOnly = newSellerMsgs.length === 0 && newlyUnlockedMsgs.length > 0;
+          const alertType: 'audio' | 'video' | 'unlock' | 'message' = isUnlockOnly || targetMediaMsg.downloadUnlocked
+            ? 'unlock'
+            : targetMediaMsg.audioUrl
+            ? 'audio'
+            : targetMediaMsg.videoUrl
+            ? 'video'
+            : 'message';
+
+          const senderDisplay = targetMediaMsg.senderName || effectiveCompanyName;
+          const alertTitle =
+            alertType === 'unlock'
+              ? '🔓 Download Liberado!'
+              : alertType === 'audio'
+              ? `🎧 ${effectiveCompanyName} enviou um áudio!`
+              : alertType === 'video'
+              ? `🎬 ${effectiveCompanyName} enviou um vídeo!`
+              : `💬 Nova mensagem de ${senderDisplay}`;
+
+          const alertSubtitle =
+            alertType === 'unlock'
+              ? 'Pagamento confirmado! Clique para baixar seu arquivo final agora.'
+              : alertType === 'audio'
+              ? targetMediaMsg.fileName
+                ? `Arquivo: ${targetMediaMsg.fileName} • Toque para ouvir a prévia.`
+                : 'Sua prévia de áudio chegou! Toque para ouvir no player abaixo.'
+              : alertType === 'video'
+              ? targetMediaMsg.fileName
+                ? `Vídeo: ${targetMediaMsg.fileName} • Toque para assistir.`
+                : 'Seu vídeo chegou! Toque para assistir agora.'
+              : targetMediaMsg.imageUrl
+              ? '📷 Enviou uma imagem no chat.'
+              : targetMediaMsg.text || 'Respondeu o seu atendimento.';
+
+          // 1. Som de notificação
           crmAlarm.playMessageNotification();
 
-          // 2. Vibrate mobile device if supported
+          // 2. Vibração forte no celular (se suportado)
           if (typeof navigator !== 'undefined' && navigator.vibrate) {
-            try { navigator.vibrate([200, 100, 200]); } catch (e) {}
-          }
-
-          // 3. Show System Notification on screen if granted
-          if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
             try {
-              new Notification(`${companyName} • ${latestMsg.senderName || 'Atendente'}`, {
-                body: latestMsg.text || (latestMsg.imageUrl ? 'Enviou uma foto de produto' : 'Respondeu seu chamado'),
-                icon: companyLogo || '/vite.svg',
-                tag: `atendepro-msg-${latestMsg.id || Date.now()}`
-              });
+              navigator.vibrate([300, 150, 300, 150, 300]);
             } catch (e) {}
           }
 
-          // 4. Flash page title if in background
+          // 3. Banner visual chamativo dentro da própria tela do cliente
+          triggerIncomingAlert({
+            id: targetMediaMsg.id,
+            type: alertType,
+            title: alertTitle,
+            subtitle: alertSubtitle,
+            senderName: senderDisplay,
+          });
+
+          // 4. Notificação nativa via Service Worker (funciona no celular Android mesmo com aba minimizada!)
+          sendPwaPushNotification(alertTitle, {
+            body: alertSubtitle,
+            companyLogo: effectiveCompanyLogo || undefined,
+            url: window.location.href,
+            tag: `atendepro-client-${targetMediaMsg.id || Date.now()}`,
+            vibrate: [300, 150, 300, 150, 300],
+          });
+
+          // 5. Atualiza o título da aba caso esteja em segundo plano
           if (typeof document !== 'undefined' && document.hidden) {
-            document.title = `🔔 (1 Nova Resposta) ${companyName}`;
+            document.title = `🔔 ${alertTitle}`;
           }
         }
       }
-      prevMessagesLengthRef.current = msgs.length;
 
       setMessages(msgs);
       // Save backup of messages
@@ -1156,19 +1274,19 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
 
       {/* Web Notification Permission Prompt Banner */}
       {notificationPermission !== 'granted' && showNotificationPrompt && (
-        <div className="bg-indigo-950 border-b border-indigo-800 px-4 py-2.5 text-white text-xs flex items-center justify-between gap-3 shadow-inner">
+        <div className="bg-indigo-950 border-b border-indigo-800 px-3.5 py-2.5 text-white text-xs flex items-center justify-between gap-2.5 shadow-inner shrink-0">
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="w-7 h-7 rounded-lg bg-indigo-500/20 text-indigo-300 flex items-center justify-center shrink-0">
               <BellRing className="w-4 h-4 text-amber-300 animate-bounce" />
             </div>
             <div className="min-w-0">
-              <p className="font-bold leading-tight text-white">Receber aviso quando o vendedor responder?</p>
+              <p className="font-bold leading-tight text-white">Receber aviso no celular quando respondermos?</p>
               <p className="text-[11px] text-indigo-200 line-clamp-1">
-                Ative para o seu celular apitar e mostrar a resposta mesmo se você fechar a página.
+                Ative para o celular apitar e mostrar na tela assim que enviarmos seu áudio ou resposta.
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0">
             <button
               type="button"
               onClick={handleRequestNotificationPermission}
@@ -1194,9 +1312,69 @@ export default function ClientWidget({ companyId, companyName, companyLogo, comp
 
       {/* Test Notification Confirmation */}
       {testNotifSent && (
-        <div className="bg-emerald-900 border-b border-emerald-700 px-4 py-2 text-white text-xs flex items-center gap-2 animate-fadeIn">
+        <div className="bg-emerald-900 border-b border-emerald-700 px-4 py-2 text-white text-xs flex items-center gap-2 animate-fadeIn shrink-0">
           <CheckCircle2 className="w-4 h-4 text-emerald-300 shrink-0" />
-          <span>✅ Notificações Ativadas! Você receberá avisos sonoros e na tela do seu celular assim que nosso vendedor responder.</span>
+          <span>✅ Alertas Ativados! Você receberá aviso sonoro e notificação no celular assim que enviarmos sua gravação ou resposta.</span>
+        </div>
+      )}
+
+      {/* Waiting Queue Reminder Tip */}
+      {activeChat?.status === ChatStatus.NEW && !incomingAlert && (
+        <div className="bg-indigo-50 border-b border-indigo-100 px-3.5 py-1.5 text-indigo-900 text-[11px] flex items-center gap-2 shrink-0">
+          <Clock className="w-3.5 h-3.5 text-indigo-600 shrink-0 animate-pulse" />
+          <span className="truncate">
+            <strong>Aguarde aqui:</strong> Mantenha esta tela aberta para receber o aviso sonoro ao vivo assim que o produtor enviar seu material.
+          </span>
+        </div>
+      )}
+
+      {/* Prominent In-Screen Incoming Audio/Video/Unlock Alert Banner */}
+      {incomingAlert && (
+        <div
+          className={`px-3.5 py-2.5 border-b flex items-center justify-between gap-2.5 shadow-md animate-fade-in shrink-0 ${
+            incomingAlert.type === 'unlock'
+              ? 'bg-emerald-600 border-emerald-700 text-white'
+              : 'bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 border-indigo-800 text-white'
+          }`}
+        >
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center shrink-0 animate-bounce">
+              {incomingAlert.type === 'unlock' ? (
+                <Unlock className="w-4 h-4 text-white" />
+              ) : incomingAlert.type === 'video' ? (
+                <Video className="w-4 h-4 text-white" />
+              ) : incomingAlert.type === 'audio' ? (
+                <Music className="w-4 h-4 text-white" />
+              ) : (
+                <BellRing className="w-4 h-4 text-amber-300" />
+              )}
+            </div>
+            <div className="min-w-0">
+              <p className="font-extrabold text-xs leading-tight truncate">{incomingAlert.title}</p>
+              <p className="text-[11px] text-white/90 truncate">{incomingAlert.subtitle}</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                scrollToLatestMessage();
+                setIncomingAlert(null);
+              }}
+              className="px-2.5 py-1.5 bg-white text-slate-900 hover:bg-amber-300 font-extrabold text-[11px] rounded-lg shadow-sm transition-colors cursor-pointer"
+            >
+              {incomingAlert.type === 'audio' ? 'Ouvir Agora' : incomingAlert.type === 'unlock' ? 'Baixar Agora' : 'Ver Agora'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setIncomingAlert(null)}
+              className="p-1 text-white/80 hover:text-white rounded-lg hover:bg-white/15 transition-colors cursor-pointer"
+              title="Fechar aviso"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
       )}
 

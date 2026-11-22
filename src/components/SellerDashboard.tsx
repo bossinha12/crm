@@ -1577,7 +1577,7 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
             <div className="flex flex-col h-full grow shrink-0 min-h-0">
               
               {/* Active Conversation header */}
-              <div className="bg-slate-50 px-3.5 py-3 sm:px-5 sm:py-4 border-b border-slate-100 flex items-center justify-between gap-2 shrink-0">
+              <div className="bg-slate-50 px-3.5 py-3 sm:px-5 sm:py-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2 shrink-0">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <h3 className="font-bold text-slate-800 text-sm sm:text-base truncate">{currentChat?.clientName}</h3>
@@ -1594,7 +1594,36 @@ export default function SellerDashboard({ companyId, company, sellerUser, onLogo
                   <p className="text-[11px] sm:text-xs text-slate-400 mt-0.5">Tempo real • Conversando com você</p>
                 </div>
 
-                <div className="shrink-0">
+                <div className="flex items-center gap-2 flex-wrap shrink-0">
+                  {(() => {
+                    const digits = (currentChat?.clientPhone || '').replace(/\D/g, '');
+                    if (!currentChat || digits.length < 8) return null;
+                    const waPhone = digits.startsWith('55') && digits.length >= 12 ? digits : `55${digits}`;
+                    const companyParam = companyId !== 'atendepro_default' ? `&empresa=${encodeURIComponent(company?.slug || companyId)}` : '';
+                    const directChatUrl = `${window.location.origin}${window.location.pathname}?view=client${companyParam}&chat=${encodeURIComponent(currentChat.id)}`;
+                    const hasUnlocked = selectedChatMessages.some(m => m.downloadUnlocked);
+                    const hasMedia = selectedChatMessages.some(m => m.audioUrl || m.videoUrl);
+                    const studioLabel = company?.name || 'nossa equipe';
+                    const waText = hasUnlocked
+                      ? `Olá ${currentChat.clientName}! Seu material em alta qualidade da ${studioLabel} já foi LIBERADO para download no nosso atendimento ao vivo. Acesse aqui: ${directChatUrl}`
+                      : hasMedia
+                      ? `Olá ${currentChat.clientName}! Acabamos de enviar sua prévia no atendimento ao vivo da ${studioLabel}. Ouça e confira por aqui: ${directChatUrl}`
+                      : `Olá ${currentChat.clientName}! Estamos te aguardando no atendimento ao vivo da ${studioLabel}. Continue sua conversa aqui: ${directChatUrl}`;
+                    const waHref = `https://wa.me/${waPhone}?text=${encodeURIComponent(waText)}`;
+                    return (
+                      <a
+                        href={waHref}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[11px] sm:text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-xl font-bold flex items-center gap-1.5 transition-colors shadow-sm"
+                        title="Abrir WhatsApp do cliente já com o link direto deste atendimento"
+                      >
+                        <Phone className="w-3.5 h-3.5" />
+                        <span>Chamar no WhatsApp</span>
+                      </a>
+                    );
+                  })()}
+
                   <button
                     onClick={handleCloseChat}
                     className="text-[11px] sm:text-xs bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 px-2.5 py-1.5 sm:px-4 sm:py-2 rounded-xl font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
